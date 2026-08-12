@@ -12,7 +12,7 @@ flect-cli ─────> flect-core
 
 `flect-runner` owns the object-safe provider boundary. `AgentRunner` consumes a narrow `AgentRequest` and JSON Schema and produces schema-validated JSON plus safe usage metadata. `MockRunner` is deterministic; `OpenAiResponsesRunner` implements async Responses-compatible HTTP without leaking provider dependencies into the core domain.
 
-`flect-cli` owns argument parsing, filesystem-oriented command orchestration, terminal/JSON reports, and logging setup. It is the composition root, not a second domain layer.
+`flect-cli` owns argument parsing, filesystem-oriented command orchestration, terminal/JSON reports, logging setup, and the thin stdio MCP adapter. MCP tool execution delegates to the existing machine-readable CLI commands so it cannot drift into a second verification implementation.
 
 ## Verification flow
 
@@ -39,4 +39,4 @@ Documents carry a `version` field. A run stores the repository root, immutable b
 
 ## Deliberate limits
 
-Repository-copy context, model repair loops beyond one bounded fallback, Skills, evaluation execution, MCP, CI mode, and release packaging are later milestones. No empty interfaces or placeholder crates exist for them.
+Repository-copy context, model repair loops beyond one bounded fallback, evaluation execution, CI mode, and release packaging are later milestones. No empty interfaces or placeholder crates exist for them.

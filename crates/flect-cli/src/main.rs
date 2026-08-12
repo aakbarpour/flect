@@ -1,6 +1,7 @@
 //! Flect command-line entry point.
 
 mod app;
+mod mcp;
 mod report;
 mod skill;
 
@@ -82,6 +83,8 @@ enum Command {
     },
     /// Diagnose the local Git, repository, and Flect configuration.
     Doctor,
+    /// Serve Flect tools over the Model Context Protocol on stdio.
+    Mcp,
     /// Manage the project-local Codex Skill integration.
     Skill {
         #[command(subcommand)]

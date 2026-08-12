@@ -1,0 +1,171 @@
+use std::fs;
+use std::io::{BufRead, BufReader, Write};
+use std::path::Path;
+use std::process::{Child, ChildStdin, ChildStdout, Command, Stdio};
+
+use serde_json::{Value, json};
+
+const SENTINEL: &str = "SECRET_ORIGINAL_TASK_MCP_SENTINEL";
+
+#[test]
+fn stdio_session_discovers_tools_and_persists_strict_blind_results() {
+    let repository = tempfile::tempdir().unwrap();
+    git(repository.path(), ["init", "-b", "main"]);
+    git(
+        repository.path(),
+        ["config", "user.email", "tests@flect.local"],
+    );
+    git(repository.path(), ["config", "user.name", "Flect Tests"]);
+    fs::write(repository.path().join("app.txt"), "old behavior\n").unwrap();
+    git(repository.path(), ["add", "app.txt"]);
+    git(repository.path(), ["commit", "-m", "base"]);
+    assert!(
+        Command::new(env!("CARGO_BIN_EXE_flect"))
+            .current_dir(repository.path())
+            .arg("init")
+            .status()
+            .unwrap()
+            .success()
+    );
+    git(repository.path(), ["add", ".gitignore", "flect.toml"]);
+    git(repository.path(), ["commit", "-m", "configure flect"]);
+
+    let mut client = McpClient::spawn(repository.path());
+    let initialized = client.request(&json!({
+        "jsonrpc": "2.0", "id": 1, "method": "initialize",
+        "params": {"protocolVersion": "2025-11-25", "capabilities": {}, "clientInfo": {"name": "flect-tests", "version": "1"}}
+    }));
+    assert_eq!(initialized["result"]["serverInfo"]["name"], "flect");
+    assert_eq!(initialized["result"]["protocolVersion"], "2025-11-25");
+    client.notify(&json!({"jsonrpc": "2.0", "method": "notifications/initialized"}));
+
+    let discovery =
+        client.request(&json!({"jsonrpc": "2.0", "id": 2, "method": "tools/list", "params": {}}));
+    let names = discovery["result"]["tools"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|tool| tool["name"].as_str().unwrap())
+        .collect::<Vec<_>>();
+    assert_eq!(
+        names,
+        [
+            "flect_start",
+            "flect_inspect",
+            "flect_echo",
+            "flect_verify",
+            "flect_get_result"
+        ]
+    );
+
+    let invalid = client.request(&json!({
+        "jsonrpc": "2.0", "id": 3, "method": "tools/call",
+        "params": {"name": "flect_start", "arguments": {"task": 42}}
+    }));
+    assert_eq!(invalid["error"]["code"], -32602);
+
+    let started = client.call(4, "flect_start", &json!({"task": SENTINEL}));
+    assert_eq!(started["result"]["isError"], false);
+    fs::write(repository.path().join("app.txt"), "new behavior\n").unwrap();
+
+    let inspected = client.call(5, "flect_inspect", &json!({}));
+    assert_eq!(inspected["result"]["isError"], false);
+    assert!(
+        !serde_json::to_string(&inspected["result"])
+            .unwrap()
+            .contains(SENTINEL)
+    );
+
+    let verified = client.call(6, "flect_verify", &json!({}));
+    assert_eq!(verified["result"]["isError"], false);
+    assert!(
+        !serde_json::to_string(&verified["result"])
+            .unwrap()
+            .contains(SENTINEL)
+    );
+    assert_eq!(
+        verified["result"]["structuredContent"]["run_id"],
+        started["result"]["structuredContent"]["id"]
+    );
+
+    let stored = client.call(7, "flect_get_result", &json!({}));
+    assert_eq!(stored["result"]["isError"], false);
+    assert_eq!(
+        stored["result"]["structuredContent"],
+        verified["result"]["structuredContent"]
+    );
+    assert!(
+        !serde_json::to_string(&stored["result"])
+            .unwrap()
+            .contains(SENTINEL)
+    );
+    client.finish();
+}
+
+struct McpClient {
+    child: Child,
+    input: Option<ChildStdin>,
+    output: BufReader<ChildStdout>,
+}
+
+impl McpClient {
+    fn spawn(directory: &Path) -> Self {
+        let mut child = Command::new(env!("CARGO_BIN_EXE_flect"))
+            .current_dir(directory)
+            .arg("mcp")
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::inherit())
+            .spawn()
+            .unwrap();
+        let input = child.stdin.take().unwrap();
+        let output = BufReader::new(child.stdout.take().unwrap());
+        Self {
+            child,
+            input: Some(input),
+            output,
+        }
+    }
+
+    fn request(&mut self, request: &Value) -> Value {
+        self.write(request);
+        let mut line = String::new();
+        self.output.read_line(&mut line).unwrap();
+        assert!(!line.is_empty(), "MCP server closed stdout");
+        serde_json::from_str(&line).unwrap()
+    }
+
+    fn notify(&mut self, notification: &Value) {
+        self.write(notification);
+    }
+
+    fn call(&mut self, id: u64, name: &str, arguments: &Value) -> Value {
+        self.request(&json!({"jsonrpc": "2.0", "id": id, "method": "tools/call", "params": {"name": name, "arguments": arguments}}))
+    }
+
+    fn write(&mut self, message: &Value) {
+        let input = self.input.as_mut().unwrap();
+        serde_json::to_writer(&mut *input, &message).unwrap();
+        writeln!(input).unwrap();
+        input.flush().unwrap();
+    }
+
+    fn finish(mut self) {
+        drop(self.input.take());
+        assert!(self.child.wait().unwrap().success());
+    }
+}
+
+fn git<const N: usize>(directory: &Path, arguments: [&str; N]) {
+    let output = Command::new("git")
+        .arg("-C")
+        .arg(directory)
+        .args(arguments)
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "git failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
