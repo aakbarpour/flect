@@ -2,7 +2,7 @@ use std::fs;
 use std::path::Path;
 use std::process::Command;
 
-use flect_core::{FileStatus, GitRepository};
+use flect_core::{FileStatus, GitError, GitRepository};
 
 #[test]
 fn captures_staged_unstaged_and_untracked_files() {
@@ -112,6 +112,73 @@ fn treats_non_utf8_untracked_content_as_binary() {
         .unwrap();
     assert!(file.binary);
     assert_eq!(file.insertions, 0);
+}
+
+#[test]
+fn rejects_oversized_untracked_file_before_capture() {
+    let repository = repository();
+    fs::write(repository.path().join("large.txt"), vec![b'x'; 4_096]).unwrap();
+    let git_repository = GitRepository::discover(repository.path()).unwrap();
+    assert!(matches!(
+        git_repository.capture_patch(&git_repository.head_revision().unwrap(), true, true, 1_024),
+        Err(GitError::PatchTooLarge { .. })
+    ));
+}
+
+#[cfg(unix)]
+#[test]
+fn rejects_untracked_symlink_to_repository_file() {
+    use std::os::unix::fs::symlink;
+    let repository = repository();
+    symlink("tracked.txt", repository.path().join("inside-link")).unwrap();
+    assert!(matches!(
+        capture_untracked(&repository),
+        Err(GitError::UnsafeUntrackedPath { .. })
+    ));
+}
+
+#[cfg(unix)]
+#[test]
+fn rejects_untracked_symlink_to_secret_looking_outside_file() {
+    use std::os::unix::fs::symlink;
+    let repository = repository();
+    let outside = tempfile::tempdir().unwrap();
+    fs::write(outside.path().join("secret.env"), "not-a-real-secret").unwrap();
+    symlink(
+        outside.path().join("secret.env"),
+        repository.path().join("outside-secret-link"),
+    )
+    .unwrap();
+    assert!(matches!(
+        capture_untracked(&repository),
+        Err(GitError::UnsafeUntrackedPath { .. })
+    ));
+}
+
+#[cfg(unix)]
+#[test]
+fn excludes_untracked_fifo() {
+    let repository = repository();
+    let fifo = repository.path().join("untracked.fifo");
+    assert!(
+        Command::new("mkfifo")
+            .arg(&fifo)
+            .status()
+            .unwrap()
+            .success()
+    );
+    let patch = capture_untracked(&repository).unwrap();
+    assert!(!patch.files.iter().any(|file| file.path == "untracked.fifo"));
+}
+
+fn capture_untracked(repository: &tempfile::TempDir) -> Result<flect_core::PatchSet, GitError> {
+    let git_repository = GitRepository::discover(repository.path()).unwrap();
+    git_repository.capture_patch(
+        &git_repository.head_revision().unwrap(),
+        true,
+        true,
+        1_000_000,
+    )
 }
 
 fn repository() -> tempfile::TempDir {

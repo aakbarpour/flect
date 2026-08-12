@@ -123,7 +123,7 @@ Recommended action
   REVISE PATCH
 ```
 
-`--echoed-spec` is an offline Milestone 1 seam, primarily for deterministic tests and evaluation fixtures. Omitting it uses the bundled mock runner and produces `UNCERTAIN`. Real provider configuration is not silently simulated.
+`--echoed-spec` is an offline deterministic seam, primarily for tests and evaluation fixtures. Omitting it uses the bundled mock runner and produces `UNCERTAIN`. Real provider configuration is not silently simulated.
 
 ## Responses API transport
 

@@ -441,7 +441,7 @@ fn fixture_repository() -> tempfile::TempDir {
     .unwrap();
     let run = RunRecord {
         version: 1,
-        id: "fl_agent_test".to_owned(),
+        id: "fl_a9e17e57a9e17e57".to_owned(),
         repository_root: repository.path().display().to_string(),
         base_revision: base.trim().to_owned(),
         task: TaskInput {
