@@ -32,6 +32,8 @@ cargo test --workspace
 
 The binary is `target/release/flect` (`flect.exe` on Windows).
 
+Prebuilt archives for five native targets, accompanied by `SHA256SUMS`, are produced by tagged releases. See [installation](docs/installation.md) for target selection, checksum verification, and source installation.
+
 ## Quick start
 
 Initialize configuration explicitly. This is the only command that adds `.flect/` to `.gitignore`.
