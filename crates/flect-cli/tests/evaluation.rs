@@ -17,9 +17,13 @@ fn offline_suite_is_reproducible_and_never_requires_api_access() {
     );
     let report: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
     assert_eq!(report["mode"], "offline");
-    assert_eq!(report["profiles"][0]["metrics"]["cases"], 10);
-    assert_eq!(report["profiles"][0]["metrics"]["exact_verdicts"], 10);
-    assert_eq!(report["profiles"][0]["metrics"]["requests"], 30);
+    assert_eq!(report["profiles"][0]["metrics"]["cases"], 40);
+    assert_eq!(report["profiles"][0]["metrics"]["exact_verdicts"], 40);
+    assert_eq!(report["profiles"][0]["metrics"]["requests"], 120);
+    assert_eq!(
+        report["profiles"][0]["metrics"]["evidence_ref_validation_failures"],
+        0
+    );
     assert_eq!(
         report["profiles"][0]["metrics"]["estimated_cost_usd"],
         serde_json::Value::Null
@@ -27,6 +31,45 @@ fn offline_suite_is_reproducible_and_never_requires_api_access() {
 
     let serialized = serde_json::to_string(&report).unwrap();
     assert!(!serialized.contains("Reject expired tokens in the auth validator"));
+}
+
+#[test]
+fn benchmark_ground_truth_and_canonical_subset_do_not_drift() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+    let suite: serde_json::Value = serde_json::from_slice(
+        &std::fs::read(root.join("fixtures/evaluation/cases.json")).unwrap(),
+    )
+    .unwrap();
+    let cases = suite["cases"].as_array().unwrap();
+    assert_eq!(cases.len(), 40);
+    let canonical = cases
+        .iter()
+        .filter(|case| case["subset"] == "canonical-5")
+        .map(|case| {
+            (
+                case["class"].as_str().unwrap(),
+                case["expected"]["verdict"].as_str().unwrap(),
+            )
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(
+        canonical,
+        vec![
+            ("correct_patch", "SAME"),
+            ("partial_implementation", "PARTIAL"),
+            ("scope_creep", "PARTIAL"),
+            ("constraint_violation", "PARTIAL"),
+            ("wrong_component", "DIFFERENT"),
+        ]
+    );
+    for case in cases {
+        let findings = case["expected"]["important_findings"].as_array().unwrap();
+        assert_eq!(
+            findings.is_empty(),
+            case["expected"]["finding_category"].is_null()
+        );
+        assert!(!case["expected"]["rationale"].as_str().unwrap().is_empty());
+    }
 }
 
 #[test]

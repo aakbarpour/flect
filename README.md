@@ -193,7 +193,7 @@ Completed Codex-native handoffs persist the verification record and then remove 
 
 ## Evaluation
 
-`flect eval` runs ten deterministic repository-level cases without an API key. Model-backed comparison is available only with both a reviewed profiles file and `--allow-paid-api`; the example compares Luna, Luna with bounded Terra escalation, and Terra. See [evaluation methodology](docs/evaluation.md) before interpreting results.
+`flect eval` runs 40 deterministic repository-level cases without an API key. Model-backed comparison is available only with both a reviewed profiles file and `--allow-paid-api`; the example compares Luna, Luna with bounded Terra escalation, and Terra. See [evaluation methodology](docs/evaluation.md) before interpreting results.
 
 ## Design and safety
 

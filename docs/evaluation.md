@@ -1,62 +1,51 @@
-# Evaluation
+# Flect Benchmark v1
 
-Flect's evaluation harness is a reproducible measurement tool, not a source of precomputed marketing claims. The bundled suite contains ten curated repository-level cases: a correct patch, partial implementation, scope creep, constraint violation, semantic workaround, broadened behavior, unrelated behavior removal, missing edge case, unnecessary refactor, and wrong-component change.
+Flect Benchmark v1 is a reproducible diagnostic evaluation, not a population-level effectiveness claim. Its 40 independently labelled repository fixtures live in `fixtures/evaluation/cases.json`. Ground truth is authored before a model run and must never be changed in response to model output.
 
-Every case in `fixtures/evaluation/cases.json` contains base files, the original task, a structured candidate patch, an intended specification, deterministic mock outputs, the expected broad verdict, and important expected findings. The harness constructs a strict `BlindBundle` without the original task before backward reconstruction.
+## Dataset composition and taxonomy
 
-## Offline evaluation
+The suite contains 6 `SAME`, 22 `PARTIAL`, 9 `DIFFERENT`, and 3 `UNCERTAIN` cases. It spans correct implementations, partial implementations, missing requirements, violated constraints, scope creep, unnecessary behavioral changes, superficial-test workarounds, wrong-component fixes, materially different implementations, semantic opposites, edge-case omissions, and insufficient evidence. Cases vary across languages, patch intent, file type, and behavioral risk.
 
-The default command is deterministic, requires no credential, performs no network request, and spends no API credits:
+Every manifest records a stable ID, original task, base files and base-state explanation, candidate patch and change explanation, intended spec, independently authored expected alignment, optional important-finding category and probes, and rationale. Finding probes are deliberately coarse diagnostics rather than semantic grading.
+
+The permanent `canonical-5` subset locks these regressions: correct → `SAME`, partial → `PARTIAL`, constraint → `PARTIAL`, scope creep → `PARTIAL`, and wrong component → `DIFFERENT`. Tests lock its membership and labels, suite size, rationales, and the relationship between finding categories and probes.
+
+## Deterministic regression mode
 
 ```console
 flect eval
-flect --json eval --output target/flect-eval-offline.json
+flect --json eval
+flect eval --output target/flect-benchmark-offline.json
 ```
 
-Offline results prove that the harness, schemas, metric aggregation, and fixture expectations are reproducible. A perfect offline score is expected because the mock responses are fixture data; it is not evidence of real-model quality.
+This default mode uses case-authored mock forward, verifier, and judge responses. It is deterministic, makes no network calls, needs no credentials, and spends no API credits. Its expected perfect result validates fixture loading, strict blindness construction, schema decoding, evidence checks, reporting, and metric aggregation only. **It does not measure model effectiveness.**
 
-## Optional model comparison
-
-Copy and review `fixtures/evaluation/profiles.example.toml`, set its credential environment variable outside the file, and opt in explicitly:
+## Explicit real model-backed mode
 
 ```console
 export OPENAI_API_KEY=...
-flect eval \
-  --profiles fixtures/evaluation/profiles.example.toml \
-  --allow-paid-api \
-  --output target/flect-eval-api.json
+flect eval --profiles fixtures/evaluation/profiles.example.toml \
+  --allow-paid-api --output target/flect-benchmark-real.json
 ```
 
-PowerShell uses `$env:OPENAI_API_KEY = "..."` and backticks for line continuation. Merely supplying a profiles file is insufficient: the command fails unless `--allow-paid-api` is also present. Normal `cargo test --workspace` execution removes the credential and runs only the offline suite.
+Both flags are required so paid execution cannot happen implicitly. Each case makes a new forward request, a new blind verifier request, and a new judge request; outputs are not reused between cases. Invalid structured output is not normalized or silently retried. Optional profile escalation is declared configuration and therefore is not an unbiased no-retry run; use an escalation-disabled profile for the canonical real benchmark.
 
-The example profiles compare:
+The blind verifier receives only the candidate patch, focused base context, manifest, and blindness report. It does **not** receive the original task, conversation, intended/forward spec, branch, commit message, or primary-agent reasoning. The judge receives the independently generated forward spec and blind reconstruction. Repository fixture code is data and is never executed.
 
-- `cheap`: `gpt-5.6-luna`, with escalation disabled.
-- `cheap-plus-escalation`: Luna with a single Terra fallback for malformed, uncertain, or below-threshold backward/reconciliation output.
-- `stronger`: `gpt-5.6-terra`, with escalation disabled.
+The HTTP profile workflow is model-backed but is not itself proof of a Codex-native agent run. A result may be called “Codex-native” only when the configured execution environment actually provides fresh Codex verifier and judge agents and the retained run artifact establishes that fact.
 
-Model IDs, endpoint, credential environment variable, reasoning effort, timeouts, and thresholds are configuration rather than permanent assumptions. Each report records the complete non-secret profile and the actual model sequence used per case.
+## Metrics and failures
 
-## Metrics
+JSON and terminal reports cover attempted and persisted cases, verdict accuracy, per-class accuracy, verifier and judge schema compliance, good-patch acceptance, bad-patch detection, false positives and false negatives, `UNCERTAIN` rate, important-finding detection, finding-category accuracy, evidence-reference validation failures, model calls, total/average/median latency, reported tokens, and estimated cost when pricing is supported. The JSON report includes the full 4×4 confusion matrix (`SAME`, `PARTIAL`, `DIFFERENT`, `UNCERTAIN`) and per-case outcomes.
 
-Reports include exact broad-verdict agreement, correct-patch acceptance, bad-patch detection, false positives, uncertainty rate, important-finding recall, requests, latency, input/cached/output tokens, and estimated cost when all required usage and known pricing are available. Unknown token counts or pricing remain `null`; Flect does not invent them.
+Malformed model output is a benchmark failure. It must be retained under its raw failure category rather than normalized, silently retried, or dropped to improve the score. Evidence references outside candidate-patch paths are counted as validation failures. Unknown usage or pricing stays `null` rather than being invented.
 
-For bad-patch detection, `PARTIAL` and `DIFFERENT` count as detected. `UNCERTAIN` is reported separately and does not count as successful detection. Important findings use case-authored, case-insensitive substring probes across structured negative findings and evidence descriptions; they are a coarse diagnostic, not a semantic score.
+## Integrity rules
 
-## RETRACE research context
+Do not special-case fixtures, weaken schemas or evidence validation, tune a prompt on a case and count that case as unbiased, or revise expected labels after examining Flect output. Prompt-development cases need a separately declared development split before claims on a held-out split. Preserve raw reports with date, code revision, suite hash, model identifiers, and configuration.
 
-Flect's design is inspired by RETRACE, but its bundled ten-case offline suite is not SWE-bench and has no published Flect real-model results. The following values are reported by the RETRACE paper, not measured by Flect:
+## Limitations and next experiments
 
-| Study configuration | Baseline | RETRACE |
-| --- | ---: | ---: |
-| mini-SWE-agent + GPT-5-mini, SWE-bench Verified (n=500) | 281/500 (56.2%) | 316/500 (63.2%) |
-| MiniMax M2.5, SWE-bench Verified (n=500) | 379/500 (75.8%) | 397/500 (79.4%) |
-| GPT-5-mini ablation (n=120) | baseline 60/120 (50.0%) | full RETRACE 73/120 (60.8%) |
+Forty curated cases are reviewable but small, synthetic, and not representative sampling from software work. Per-class values are descriptive only. Mock success says nothing about live-model quality. Confidence is not calibrated; model snapshots, latency, token reporting, and pricing change. Future work should add independently reviewed real patches, a frozen held-out set, inter-rater agreement, repeated runs for variance, ablations, and a clearly defined no-Flect baseline.
 
-The paper's ablation also reports 68/120 (56.7%) for each forward-only and backward-only configuration. These figures motivate Flect's forward intent, blind reconstruction, and reconciliation architecture, but they do not establish Flect effectiveness, cost, false-positive rate, or model quality. See [the RETRACE paper](https://arxiv.org/abs/2608.08950).
-
-## Methodology limits
-
-Ten hand-authored cases are sufficient to expose regressions and compare configurations directionally, but not to support population-level effectiveness claims or per-class precision/recall. There is only one case in most classes. Model confidence is an uncalibrated routing signal. Provider behavior, model snapshots, and pricing can change, so reports should be retained with dates and exact configuration.
-
-RETRACE results above are research context and are never presented as Flect measurements. A no-Flect baseline must be defined before any future comparative claim.
+RETRACE and other research results are context, not Flect results. Never attribute their benchmark numbers to Flect or advertise Flect benchmark numbers in the README before a retained real run is complete.

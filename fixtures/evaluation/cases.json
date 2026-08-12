@@ -2,104 +2,3282 @@
   "version": 1,
   "cases": [
     {
-      "name": "correct patch", "class": "correct_patch",
-      "base_files": [{"path": "src/auth.rs", "content": "fn valid(token: &Token) -> bool { true }\n"}],
+      "name": "correct patch",
+      "class": "correct_patch",
+      "base_files": [
+        {
+          "path": "src/auth.rs",
+          "content": "fn valid(token: &Token) -> bool { true }\n"
+        }
+      ],
       "original_task": "Reject expired tokens in the auth validator",
-      "candidate_patch": {"base_revision": "fixture", "files": [{"path": "src/auth.rs", "status": "modified", "patch": "@@ -1 +1 @@\n-fn valid(token: &Token) -> bool { true }\n+fn valid(token: &Token) -> bool { !token.expired() }", "insertions": 1, "deletions": 1, "binary": false}], "renames": 0, "insertions": 1, "deletions": 1, "binary_files": [], "untracked_files": []},
-      "intended_spec": {"objective": "Reject expired tokens", "requirements": ["Reject expired tokens"], "expected_scope": ["src/auth.rs"]},
-      "mock_echoed_spec": {"apparent_objective": "Reject expired tokens", "behavior_after": ["Expired tokens are rejected"], "affected_scope": ["src/auth.rs"], "confidence": 0.95},
-      "mock_verdict": {"alignment": "SAME", "agreements": ["Expired tokens are rejected"], "missing_requirements": [], "unrequested_changes": [], "violated_constraints": [], "potential_side_effects": [], "uncertainties": [], "evidence": [], "confidence": 0.95, "recommended_action": "SHIP"},
-      "expected": {"verdict": "SAME", "important_findings": []}
+      "candidate_patch": {
+        "base_revision": "fixture",
+        "files": [
+          {
+            "path": "src/auth.rs",
+            "status": "modified",
+            "patch": "@@ -1 +1 @@\n-fn valid(token: &Token) -> bool { true }\n+fn valid(token: &Token) -> bool { !token.expired() }",
+            "insertions": 1,
+            "deletions": 1,
+            "binary": false
+          }
+        ],
+        "renames": 0,
+        "insertions": 1,
+        "deletions": 1,
+        "binary_files": [],
+        "untracked_files": []
+      },
+      "intended_spec": {
+        "objective": "Reject expired tokens",
+        "requirements": [
+          "Reject expired tokens"
+        ],
+        "expected_scope": [
+          "src/auth.rs"
+        ]
+      },
+      "mock_echoed_spec": {
+        "apparent_objective": "Reject expired tokens",
+        "behavior_after": [
+          "Expired tokens are rejected"
+        ],
+        "affected_scope": [
+          "src/auth.rs"
+        ],
+        "confidence": 0.95
+      },
+      "mock_verdict": {
+        "alignment": "SAME",
+        "agreements": [
+          "Expired tokens are rejected"
+        ],
+        "missing_requirements": [],
+        "unrequested_changes": [],
+        "violated_constraints": [],
+        "potential_side_effects": [],
+        "uncertainties": [],
+        "evidence": [],
+        "confidence": 0.95,
+        "recommended_action": "SHIP"
+      },
+      "expected": {
+        "verdict": "SAME",
+        "important_findings": [],
+        "finding_category": null,
+        "rationale": "The patch is expected to be SAME because expired tokens are rejected."
+      },
+      "id": "canonical-01",
+      "subset": "canonical-5",
+      "base_state": "Repository files before applying the candidate patch.",
+      "change": "Candidate patch recorded in candidate_patch."
     },
     {
-      "name": "partial implementation", "class": "partial_implementation",
-      "base_files": [{"path": "src/api.rs", "content": "fn handle(req: Request) -> Response { process(req) }\n"}],
+      "name": "partial implementation",
+      "class": "partial_implementation",
+      "base_files": [
+        {
+          "path": "src/api.rs",
+          "content": "fn handle(req: Request) -> Response { process(req) }\n"
+        }
+      ],
       "original_task": "Validate requests and enforce the rate limit",
-      "candidate_patch": {"base_revision": "fixture", "files": [{"path": "src/api.rs", "status": "modified", "patch": "@@ -1 +1 @@\n-fn handle(req: Request) -> Response { process(req) }\n+fn handle(req: Request) -> Response { validate(&req); process(req) }", "insertions": 1, "deletions": 1, "binary": false}], "renames": 0, "insertions": 1, "deletions": 1, "binary_files": [], "untracked_files": []},
-      "intended_spec": {"objective": "Validate and rate-limit requests", "requirements": ["Validate requests", "Enforce the rate limit"], "expected_scope": ["src/api.rs"]},
-      "mock_echoed_spec": {"apparent_objective": "Validate requests", "behavior_after": ["Requests are validated"], "affected_scope": ["src/api.rs"], "confidence": 0.9},
-      "mock_verdict": {"alignment": "PARTIAL", "agreements": ["Requests are validated"], "missing_requirements": ["The rate limit is not enforced"], "unrequested_changes": [], "violated_constraints": [], "potential_side_effects": [], "uncertainties": [], "evidence": [{"file": "src/api.rs", "description": "The patch adds validation but no rate limit", "confidence": 0.9}], "confidence": 0.9, "recommended_action": "REVISE_PATCH"},
-      "expected": {"verdict": "PARTIAL", "important_findings": ["rate limit"]}
+      "candidate_patch": {
+        "base_revision": "fixture",
+        "files": [
+          {
+            "path": "src/api.rs",
+            "status": "modified",
+            "patch": "@@ -1 +1 @@\n-fn handle(req: Request) -> Response { process(req) }\n+fn handle(req: Request) -> Response { validate(&req); process(req) }",
+            "insertions": 1,
+            "deletions": 1,
+            "binary": false
+          }
+        ],
+        "renames": 0,
+        "insertions": 1,
+        "deletions": 1,
+        "binary_files": [],
+        "untracked_files": []
+      },
+      "intended_spec": {
+        "objective": "Validate and rate-limit requests",
+        "requirements": [
+          "Validate requests",
+          "Enforce the rate limit"
+        ],
+        "expected_scope": [
+          "src/api.rs"
+        ]
+      },
+      "mock_echoed_spec": {
+        "apparent_objective": "Validate requests",
+        "behavior_after": [
+          "Requests are validated"
+        ],
+        "affected_scope": [
+          "src/api.rs"
+        ],
+        "confidence": 0.9
+      },
+      "mock_verdict": {
+        "alignment": "PARTIAL",
+        "agreements": [
+          "Requests are validated"
+        ],
+        "missing_requirements": [
+          "The rate limit is not enforced"
+        ],
+        "unrequested_changes": [],
+        "violated_constraints": [],
+        "potential_side_effects": [],
+        "uncertainties": [],
+        "evidence": [
+          {
+            "file": "src/api.rs",
+            "description": "The patch adds validation but no rate limit",
+            "confidence": 0.9
+          }
+        ],
+        "confidence": 0.9,
+        "recommended_action": "REVISE_PATCH"
+      },
+      "expected": {
+        "verdict": "PARTIAL",
+        "important_findings": [
+          "rate limit"
+        ],
+        "finding_category": "partial_implementation",
+        "rationale": "The patch is expected to be PARTIAL because requests are validated."
+      },
+      "id": "canonical-02",
+      "subset": "canonical-5",
+      "base_state": "Repository files before applying the candidate patch.",
+      "change": "Candidate patch recorded in candidate_patch."
     },
     {
-      "name": "scope creep", "class": "scope_creep",
-      "base_files": [{"path": "src/cache.rs", "content": "fn get(key: &str) -> Value { load(key) }\n"}],
+      "name": "scope creep",
+      "class": "scope_creep",
+      "base_files": [
+        {
+          "path": "src/cache.rs",
+          "content": "fn get(key: &str) -> Value { load(key) }\n"
+        }
+      ],
       "original_task": "Return cached values for known keys",
-      "candidate_patch": {"base_revision": "fixture", "files": [{"path": "src/cache.rs", "status": "modified", "patch": "@@ -1 +1 @@\n-fn get(key: &str) -> Value { load(key) }\n+fn get(key: &str) -> Value { log::info!(\"{key}\"); cache(key) }", "insertions": 1, "deletions": 1, "binary": false}], "renames": 0, "insertions": 1, "deletions": 1, "binary_files": [], "untracked_files": []},
-      "intended_spec": {"objective": "Use cached values", "requirements": ["Return cached values"], "non_goals": ["Add request logging"], "expected_scope": ["src/cache.rs"]},
-      "mock_echoed_spec": {"apparent_objective": "Cache values and log keys", "behavior_after": ["Cached values are returned", "Every key is logged"], "affected_scope": ["src/cache.rs"], "side_effects": ["Logs cache keys"], "confidence": 0.9},
-      "mock_verdict": {"alignment": "PARTIAL", "agreements": ["Cached values are returned"], "missing_requirements": [], "unrequested_changes": ["Adds logging of cache keys"], "violated_constraints": [], "potential_side_effects": ["Keys may contain sensitive values"], "uncertainties": [], "evidence": [{"file": "src/cache.rs", "description": "Logging was added outside requested scope", "confidence": 0.9}], "confidence": 0.9, "recommended_action": "REVISE_PATCH"},
-      "expected": {"verdict": "PARTIAL", "important_findings": ["logging"]}
+      "candidate_patch": {
+        "base_revision": "fixture",
+        "files": [
+          {
+            "path": "src/cache.rs",
+            "status": "modified",
+            "patch": "@@ -1 +1 @@\n-fn get(key: &str) -> Value { load(key) }\n+fn get(key: &str) -> Value { log::info!(\"{key}\"); cache(key) }",
+            "insertions": 1,
+            "deletions": 1,
+            "binary": false
+          }
+        ],
+        "renames": 0,
+        "insertions": 1,
+        "deletions": 1,
+        "binary_files": [],
+        "untracked_files": []
+      },
+      "intended_spec": {
+        "objective": "Use cached values",
+        "requirements": [
+          "Return cached values"
+        ],
+        "non_goals": [
+          "Add request logging"
+        ],
+        "expected_scope": [
+          "src/cache.rs"
+        ]
+      },
+      "mock_echoed_spec": {
+        "apparent_objective": "Cache values and log keys",
+        "behavior_after": [
+          "Cached values are returned",
+          "Every key is logged"
+        ],
+        "affected_scope": [
+          "src/cache.rs"
+        ],
+        "side_effects": [
+          "Logs cache keys"
+        ],
+        "confidence": 0.9
+      },
+      "mock_verdict": {
+        "alignment": "PARTIAL",
+        "agreements": [
+          "Cached values are returned"
+        ],
+        "missing_requirements": [],
+        "unrequested_changes": [
+          "Adds logging of cache keys"
+        ],
+        "violated_constraints": [],
+        "potential_side_effects": [
+          "Keys may contain sensitive values"
+        ],
+        "uncertainties": [],
+        "evidence": [
+          {
+            "file": "src/cache.rs",
+            "description": "Logging was added outside requested scope",
+            "confidence": 0.9
+          }
+        ],
+        "confidence": 0.9,
+        "recommended_action": "REVISE_PATCH"
+      },
+      "expected": {
+        "verdict": "PARTIAL",
+        "important_findings": [
+          "logging"
+        ],
+        "finding_category": "scope_creep",
+        "rationale": "The patch is expected to be PARTIAL because cached values are returned."
+      },
+      "id": "canonical-03",
+      "subset": "canonical-5",
+      "base_state": "Repository files before applying the candidate patch.",
+      "change": "Candidate patch recorded in candidate_patch."
     },
     {
-      "name": "constraint violation", "class": "constraint_violation",
-      "base_files": [{"path": "src/lib.rs", "content": "pub fn parse(v: &str) -> Item { old_parse(v) }\n"}],
+      "name": "constraint violation",
+      "class": "constraint_violation",
+      "base_files": [
+        {
+          "path": "src/lib.rs",
+          "content": "pub fn parse(v: &str) -> Item { old_parse(v) }\n"
+        }
+      ],
       "original_task": "Speed up parsing without changing the public API",
-      "candidate_patch": {"base_revision": "fixture", "files": [{"path": "src/lib.rs", "status": "modified", "patch": "@@ -1 +1 @@\n-pub fn parse(v: &str) -> Item { old_parse(v) }\n+pub fn parse(v: Bytes) -> Item { fast_parse(v) }", "insertions": 1, "deletions": 1, "binary": false}], "renames": 0, "insertions": 1, "deletions": 1, "binary_files": [], "untracked_files": []},
-      "intended_spec": {"objective": "Speed up parsing", "requirements": ["Improve parser performance"], "constraints": ["Do not change the public API"], "expected_scope": ["src/lib.rs"]},
-      "mock_echoed_spec": {"apparent_objective": "Use a faster parser", "behavior_after": ["Parsing uses bytes"], "affected_scope": ["src/lib.rs"], "side_effects": ["The public input type changes"], "confidence": 0.95},
-      "mock_verdict": {"alignment": "PARTIAL", "agreements": ["Parser implementation changes"], "missing_requirements": [], "unrequested_changes": [], "violated_constraints": ["Changes the public API from string to bytes"], "potential_side_effects": ["Callers must migrate"], "uncertainties": [], "evidence": [{"file": "src/lib.rs", "description": "The public API parameter type changed", "confidence": 0.95}], "confidence": 0.95, "recommended_action": "REVISE_PATCH"},
-      "expected": {"verdict": "PARTIAL", "important_findings": ["public api"]}
+      "candidate_patch": {
+        "base_revision": "fixture",
+        "files": [
+          {
+            "path": "src/lib.rs",
+            "status": "modified",
+            "patch": "@@ -1 +1 @@\n-pub fn parse(v: &str) -> Item { old_parse(v) }\n+pub fn parse(v: Bytes) -> Item { fast_parse(v) }",
+            "insertions": 1,
+            "deletions": 1,
+            "binary": false
+          }
+        ],
+        "renames": 0,
+        "insertions": 1,
+        "deletions": 1,
+        "binary_files": [],
+        "untracked_files": []
+      },
+      "intended_spec": {
+        "objective": "Speed up parsing",
+        "requirements": [
+          "Improve parser performance"
+        ],
+        "constraints": [
+          "Do not change the public API"
+        ],
+        "expected_scope": [
+          "src/lib.rs"
+        ]
+      },
+      "mock_echoed_spec": {
+        "apparent_objective": "Use a faster parser",
+        "behavior_after": [
+          "Parsing uses bytes"
+        ],
+        "affected_scope": [
+          "src/lib.rs"
+        ],
+        "side_effects": [
+          "The public input type changes"
+        ],
+        "confidence": 0.95
+      },
+      "mock_verdict": {
+        "alignment": "PARTIAL",
+        "agreements": [
+          "Parser implementation changes"
+        ],
+        "missing_requirements": [],
+        "unrequested_changes": [],
+        "violated_constraints": [
+          "Changes the public API from string to bytes"
+        ],
+        "potential_side_effects": [
+          "Callers must migrate"
+        ],
+        "uncertainties": [],
+        "evidence": [
+          {
+            "file": "src/lib.rs",
+            "description": "The public API parameter type changed",
+            "confidence": 0.95
+          }
+        ],
+        "confidence": 0.95,
+        "recommended_action": "REVISE_PATCH"
+      },
+      "expected": {
+        "verdict": "PARTIAL",
+        "important_findings": [
+          "public api"
+        ],
+        "finding_category": "constraint_violation",
+        "rationale": "The patch is expected to be PARTIAL because parser implementation changes."
+      },
+      "id": "canonical-04",
+      "subset": "canonical-5",
+      "base_state": "Repository files before applying the candidate patch.",
+      "change": "Candidate patch recorded in candidate_patch."
     },
     {
-      "name": "semantic workaround", "class": "semantic_workaround",
-      "base_files": [{"path": "src/search.rs", "content": "fn search(q: &str) -> Vec<Row> { db_search(q) }\n"}],
+      "name": "semantic workaround",
+      "class": "semantic_workaround",
+      "base_files": [
+        {
+          "path": "src/search.rs",
+          "content": "fn search(q: &str) -> Vec<Row> { db_search(q) }\n"
+        }
+      ],
       "original_task": "Make repeated searches faster",
-      "candidate_patch": {"base_revision": "fixture", "files": [{"path": "src/search.rs", "status": "modified", "patch": "@@ -1 +1 @@\n-fn search(q: &str) -> Vec<Row> { db_search(q) }\n+fn search(q: &str) -> Vec<Row> { ALL_ROWS.clone().filter(q) }", "insertions": 1, "deletions": 1, "binary": false}], "renames": 0, "insertions": 1, "deletions": 1, "binary_files": [], "untracked_files": []},
-      "intended_spec": {"objective": "Make repeated searches faster", "requirements": ["Reduce repeated search latency"], "constraints": ["Do not load the whole dataset into memory"], "expected_scope": ["src/search.rs"]},
-      "mock_echoed_spec": {"apparent_objective": "Search an in-memory copy", "behavior_after": ["All rows are cloned then filtered"], "affected_scope": ["src/search.rs"], "side_effects": ["Memory grows with the dataset"], "confidence": 0.9},
-      "mock_verdict": {"alignment": "PARTIAL", "agreements": ["Avoids repeated database calls"], "missing_requirements": [], "unrequested_changes": [], "violated_constraints": ["Loads the dataset into memory"], "potential_side_effects": ["Unbounded memory growth"], "uncertainties": [], "evidence": [{"file": "src/search.rs", "description": "The workaround clones all rows into memory", "confidence": 0.9}], "confidence": 0.9, "recommended_action": "REVISE_PATCH"},
-      "expected": {"verdict": "PARTIAL", "important_findings": ["memory"]}
+      "candidate_patch": {
+        "base_revision": "fixture",
+        "files": [
+          {
+            "path": "src/search.rs",
+            "status": "modified",
+            "patch": "@@ -1 +1 @@\n-fn search(q: &str) -> Vec<Row> { db_search(q) }\n+fn search(q: &str) -> Vec<Row> { ALL_ROWS.clone().filter(q) }",
+            "insertions": 1,
+            "deletions": 1,
+            "binary": false
+          }
+        ],
+        "renames": 0,
+        "insertions": 1,
+        "deletions": 1,
+        "binary_files": [],
+        "untracked_files": []
+      },
+      "intended_spec": {
+        "objective": "Make repeated searches faster",
+        "requirements": [
+          "Reduce repeated search latency"
+        ],
+        "constraints": [
+          "Do not load the whole dataset into memory"
+        ],
+        "expected_scope": [
+          "src/search.rs"
+        ]
+      },
+      "mock_echoed_spec": {
+        "apparent_objective": "Search an in-memory copy",
+        "behavior_after": [
+          "All rows are cloned then filtered"
+        ],
+        "affected_scope": [
+          "src/search.rs"
+        ],
+        "side_effects": [
+          "Memory grows with the dataset"
+        ],
+        "confidence": 0.9
+      },
+      "mock_verdict": {
+        "alignment": "PARTIAL",
+        "agreements": [
+          "Avoids repeated database calls"
+        ],
+        "missing_requirements": [],
+        "unrequested_changes": [],
+        "violated_constraints": [
+          "Loads the dataset into memory"
+        ],
+        "potential_side_effects": [
+          "Unbounded memory growth"
+        ],
+        "uncertainties": [],
+        "evidence": [
+          {
+            "file": "src/search.rs",
+            "description": "The workaround clones all rows into memory",
+            "confidence": 0.9
+          }
+        ],
+        "confidence": 0.9,
+        "recommended_action": "REVISE_PATCH"
+      },
+      "expected": {
+        "verdict": "PARTIAL",
+        "important_findings": [
+          "memory"
+        ],
+        "finding_category": "semantic_workaround",
+        "rationale": "The patch is expected to be PARTIAL because avoids repeated database calls."
+      },
+      "id": "canonical-05",
+      "subset": "benchmark-v1",
+      "base_state": "Repository files before applying the candidate patch.",
+      "change": "Candidate patch recorded in candidate_patch."
     },
     {
-      "name": "broadened behavior", "class": "broadened_behavior",
-      "base_files": [{"path": "src/cors.rs", "content": "fn allowed(origin: &str) -> bool { origin == TRUSTED }\n"}],
+      "name": "broadened behavior",
+      "class": "broadened_behavior",
+      "base_files": [
+        {
+          "path": "src/cors.rs",
+          "content": "fn allowed(origin: &str) -> bool { origin == TRUSTED }\n"
+        }
+      ],
       "original_task": "Allow the staging origin in CORS",
-      "candidate_patch": {"base_revision": "fixture", "files": [{"path": "src/cors.rs", "status": "modified", "patch": "@@ -1 +1 @@\n-fn allowed(origin: &str) -> bool { origin == TRUSTED }\n+fn allowed(_origin: &str) -> bool { true }", "insertions": 1, "deletions": 1, "binary": false}], "renames": 0, "insertions": 1, "deletions": 1, "binary_files": [], "untracked_files": []},
-      "intended_spec": {"objective": "Allow staging CORS", "requirements": ["Allow the staging origin"], "constraints": ["Keep other origins denied"], "expected_scope": ["src/cors.rs"]},
-      "mock_echoed_spec": {"apparent_objective": "Allow every origin", "behavior_after": ["All origins are allowed"], "affected_scope": ["src/cors.rs"], "side_effects": ["CORS restrictions are disabled"], "confidence": 0.98},
-      "mock_verdict": {"alignment": "PARTIAL", "agreements": ["Staging becomes allowed"], "missing_requirements": [], "unrequested_changes": ["Allows all origins"], "violated_constraints": ["Other origins are no longer denied"], "potential_side_effects": ["CORS protection is disabled"], "uncertainties": [], "evidence": [{"file": "src/cors.rs", "description": "The function now returns true for all origins", "confidence": 0.98}], "confidence": 0.98, "recommended_action": "REVISE_PATCH"},
-      "expected": {"verdict": "PARTIAL", "important_findings": ["all origins"]}
+      "candidate_patch": {
+        "base_revision": "fixture",
+        "files": [
+          {
+            "path": "src/cors.rs",
+            "status": "modified",
+            "patch": "@@ -1 +1 @@\n-fn allowed(origin: &str) -> bool { origin == TRUSTED }\n+fn allowed(_origin: &str) -> bool { true }",
+            "insertions": 1,
+            "deletions": 1,
+            "binary": false
+          }
+        ],
+        "renames": 0,
+        "insertions": 1,
+        "deletions": 1,
+        "binary_files": [],
+        "untracked_files": []
+      },
+      "intended_spec": {
+        "objective": "Allow staging CORS",
+        "requirements": [
+          "Allow the staging origin"
+        ],
+        "constraints": [
+          "Keep other origins denied"
+        ],
+        "expected_scope": [
+          "src/cors.rs"
+        ]
+      },
+      "mock_echoed_spec": {
+        "apparent_objective": "Allow every origin",
+        "behavior_after": [
+          "All origins are allowed"
+        ],
+        "affected_scope": [
+          "src/cors.rs"
+        ],
+        "side_effects": [
+          "CORS restrictions are disabled"
+        ],
+        "confidence": 0.98
+      },
+      "mock_verdict": {
+        "alignment": "PARTIAL",
+        "agreements": [
+          "Staging becomes allowed"
+        ],
+        "missing_requirements": [],
+        "unrequested_changes": [
+          "Allows all origins"
+        ],
+        "violated_constraints": [
+          "Other origins are no longer denied"
+        ],
+        "potential_side_effects": [
+          "CORS protection is disabled"
+        ],
+        "uncertainties": [],
+        "evidence": [
+          {
+            "file": "src/cors.rs",
+            "description": "The function now returns true for all origins",
+            "confidence": 0.98
+          }
+        ],
+        "confidence": 0.98,
+        "recommended_action": "REVISE_PATCH"
+      },
+      "expected": {
+        "verdict": "PARTIAL",
+        "important_findings": [
+          "all origins"
+        ],
+        "finding_category": "broadened_behavior",
+        "rationale": "The patch is expected to be PARTIAL because staging becomes allowed."
+      },
+      "id": "legacy-06",
+      "subset": "benchmark-v1",
+      "base_state": "Repository files before applying the candidate patch.",
+      "change": "Candidate patch recorded in candidate_patch."
     },
     {
-      "name": "unrelated behavior removal", "class": "unrelated_removal",
-      "base_files": [{"path": "src/parser.rs", "content": "fn parse(v: &str) { modern(v).or_else(|| legacy(v)); }\n"}],
+      "name": "unrelated behavior removal",
+      "class": "unrelated_removal",
+      "base_files": [
+        {
+          "path": "src/parser.rs",
+          "content": "fn parse(v: &str) { modern(v).or_else(|| legacy(v)); }\n"
+        }
+      ],
       "original_task": "Improve the modern parser error message",
-      "candidate_patch": {"base_revision": "fixture", "files": [{"path": "src/parser.rs", "status": "modified", "patch": "@@ -1 +1 @@\n-fn parse(v: &str) { modern(v).or_else(|| legacy(v)); }\n+fn parse(v: &str) { modern(v).expect(\"invalid modern input\"); }", "insertions": 1, "deletions": 1, "binary": false}], "renames": 0, "insertions": 1, "deletions": 1, "binary_files": [], "untracked_files": []},
-      "intended_spec": {"objective": "Improve modern parser errors", "requirements": ["Improve the error message"], "constraints": ["Preserve legacy parsing"], "expected_scope": ["src/parser.rs"]},
-      "mock_echoed_spec": {"apparent_objective": "Fail modern parsing with a new message", "behavior_after": ["Modern failures abort"], "affected_scope": ["src/parser.rs"], "side_effects": ["Legacy parsing is removed"], "confidence": 0.95},
-      "mock_verdict": {"alignment": "DIFFERENT", "agreements": ["Error text changes"], "missing_requirements": [], "unrequested_changes": ["Removes the legacy parser fallback"], "violated_constraints": ["Legacy parsing is not preserved"], "potential_side_effects": ["Legacy inputs fail"], "uncertainties": [], "evidence": [{"file": "src/parser.rs", "description": "The legacy parser call was removed", "confidence": 0.95}], "confidence": 0.95, "recommended_action": "REVISIT_REASONING"},
-      "expected": {"verdict": "DIFFERENT", "important_findings": ["legacy parser"]}
+      "candidate_patch": {
+        "base_revision": "fixture",
+        "files": [
+          {
+            "path": "src/parser.rs",
+            "status": "modified",
+            "patch": "@@ -1 +1 @@\n-fn parse(v: &str) { modern(v).or_else(|| legacy(v)); }\n+fn parse(v: &str) { modern(v).expect(\"invalid modern input\"); }",
+            "insertions": 1,
+            "deletions": 1,
+            "binary": false
+          }
+        ],
+        "renames": 0,
+        "insertions": 1,
+        "deletions": 1,
+        "binary_files": [],
+        "untracked_files": []
+      },
+      "intended_spec": {
+        "objective": "Improve modern parser errors",
+        "requirements": [
+          "Improve the error message"
+        ],
+        "constraints": [
+          "Preserve legacy parsing"
+        ],
+        "expected_scope": [
+          "src/parser.rs"
+        ]
+      },
+      "mock_echoed_spec": {
+        "apparent_objective": "Fail modern parsing with a new message",
+        "behavior_after": [
+          "Modern failures abort"
+        ],
+        "affected_scope": [
+          "src/parser.rs"
+        ],
+        "side_effects": [
+          "Legacy parsing is removed"
+        ],
+        "confidence": 0.95
+      },
+      "mock_verdict": {
+        "alignment": "DIFFERENT",
+        "agreements": [
+          "Error text changes"
+        ],
+        "missing_requirements": [],
+        "unrequested_changes": [
+          "Removes the legacy parser fallback"
+        ],
+        "violated_constraints": [
+          "Legacy parsing is not preserved"
+        ],
+        "potential_side_effects": [
+          "Legacy inputs fail"
+        ],
+        "uncertainties": [],
+        "evidence": [
+          {
+            "file": "src/parser.rs",
+            "description": "The legacy parser call was removed",
+            "confidence": 0.95
+          }
+        ],
+        "confidence": 0.95,
+        "recommended_action": "REVISIT_REASONING"
+      },
+      "expected": {
+        "verdict": "DIFFERENT",
+        "important_findings": [
+          "legacy parser"
+        ],
+        "finding_category": "unrelated_removal",
+        "rationale": "The patch is expected to be DIFFERENT because error text changes."
+      },
+      "id": "legacy-07",
+      "subset": "benchmark-v1",
+      "base_state": "Repository files before applying the candidate patch.",
+      "change": "Candidate patch recorded in candidate_patch."
     },
     {
-      "name": "missing edge case", "class": "missing_edge_case",
-      "base_files": [{"path": "src/name.rs", "content": "fn normalize(v: &str) -> String { v.to_string() }\n"}],
+      "name": "missing edge case",
+      "class": "missing_edge_case",
+      "base_files": [
+        {
+          "path": "src/name.rs",
+          "content": "fn normalize(v: &str) -> String { v.to_string() }\n"
+        }
+      ],
       "original_task": "Trim and lowercase names, preserving empty input",
-      "candidate_patch": {"base_revision": "fixture", "files": [{"path": "src/name.rs", "status": "modified", "patch": "@@ -1 +1 @@\n-fn normalize(v: &str) -> String { v.to_string() }\n+fn normalize(v: &str) -> String { assert!(!v.is_empty()); v.trim().to_lowercase() }", "insertions": 1, "deletions": 1, "binary": false}], "renames": 0, "insertions": 1, "deletions": 1, "binary_files": [], "untracked_files": []},
-      "intended_spec": {"objective": "Normalize names", "requirements": ["Trim names", "Lowercase names", "Preserve empty input"], "expected_scope": ["src/name.rs"]},
-      "mock_echoed_spec": {"apparent_objective": "Normalize non-empty names", "behavior_after": ["Names are trimmed and lowercased", "Empty input panics"], "affected_scope": ["src/name.rs"], "confidence": 0.95},
-      "mock_verdict": {"alignment": "PARTIAL", "agreements": ["Names are trimmed and lowercased"], "missing_requirements": ["Empty input is not preserved"], "unrequested_changes": [], "violated_constraints": [], "potential_side_effects": ["Empty input panics"], "uncertainties": [], "evidence": [{"file": "src/name.rs", "description": "An assertion rejects empty input", "confidence": 0.95}], "confidence": 0.95, "recommended_action": "REVISE_PATCH"},
-      "expected": {"verdict": "PARTIAL", "important_findings": ["empty input"]}
+      "candidate_patch": {
+        "base_revision": "fixture",
+        "files": [
+          {
+            "path": "src/name.rs",
+            "status": "modified",
+            "patch": "@@ -1 +1 @@\n-fn normalize(v: &str) -> String { v.to_string() }\n+fn normalize(v: &str) -> String { assert!(!v.is_empty()); v.trim().to_lowercase() }",
+            "insertions": 1,
+            "deletions": 1,
+            "binary": false
+          }
+        ],
+        "renames": 0,
+        "insertions": 1,
+        "deletions": 1,
+        "binary_files": [],
+        "untracked_files": []
+      },
+      "intended_spec": {
+        "objective": "Normalize names",
+        "requirements": [
+          "Trim names",
+          "Lowercase names",
+          "Preserve empty input"
+        ],
+        "expected_scope": [
+          "src/name.rs"
+        ]
+      },
+      "mock_echoed_spec": {
+        "apparent_objective": "Normalize non-empty names",
+        "behavior_after": [
+          "Names are trimmed and lowercased",
+          "Empty input panics"
+        ],
+        "affected_scope": [
+          "src/name.rs"
+        ],
+        "confidence": 0.95
+      },
+      "mock_verdict": {
+        "alignment": "PARTIAL",
+        "agreements": [
+          "Names are trimmed and lowercased"
+        ],
+        "missing_requirements": [
+          "Empty input is not preserved"
+        ],
+        "unrequested_changes": [],
+        "violated_constraints": [],
+        "potential_side_effects": [
+          "Empty input panics"
+        ],
+        "uncertainties": [],
+        "evidence": [
+          {
+            "file": "src/name.rs",
+            "description": "An assertion rejects empty input",
+            "confidence": 0.95
+          }
+        ],
+        "confidence": 0.95,
+        "recommended_action": "REVISE_PATCH"
+      },
+      "expected": {
+        "verdict": "PARTIAL",
+        "important_findings": [
+          "empty input"
+        ],
+        "finding_category": "missing_edge_case",
+        "rationale": "The patch is expected to be PARTIAL because names are trimmed and lowercased."
+      },
+      "id": "legacy-08",
+      "subset": "benchmark-v1",
+      "base_state": "Repository files before applying the candidate patch.",
+      "change": "Candidate patch recorded in candidate_patch."
     },
     {
-      "name": "unnecessary refactor", "class": "unnecessary_refactor",
-      "base_files": [{"path": "src/config.rs", "content": "fn timeout() -> u64 { 30 }\n"}],
+      "name": "unnecessary refactor",
+      "class": "unnecessary_refactor",
+      "base_files": [
+        {
+          "path": "src/config.rs",
+          "content": "fn timeout() -> u64 { 30 }\n"
+        }
+      ],
       "original_task": "Increase the default timeout to 60 seconds",
-      "candidate_patch": {"base_revision": "fixture", "files": [{"path": "src/config.rs", "status": "modified", "patch": "@@ -1 +1 @@\n-fn timeout() -> u64 { 30 }\n+fn request_deadline_seconds() -> u64 { 60 }", "insertions": 1, "deletions": 1, "binary": false}], "renames": 0, "insertions": 1, "deletions": 1, "binary_files": [], "untracked_files": []},
-      "intended_spec": {"objective": "Increase default timeout", "requirements": ["Set timeout to 60 seconds"], "non_goals": ["Rename public functions"], "expected_scope": ["src/config.rs"]},
-      "mock_echoed_spec": {"apparent_objective": "Increase and rename timeout", "behavior_after": ["Deadline is 60 seconds", "The timeout function is renamed"], "affected_scope": ["src/config.rs"], "side_effects": ["Existing callers break"], "confidence": 0.95},
-      "mock_verdict": {"alignment": "PARTIAL", "agreements": ["The value becomes 60"], "missing_requirements": [], "unrequested_changes": ["Renames the timeout function"], "violated_constraints": [], "potential_side_effects": ["Existing callers may fail"], "uncertainties": [], "evidence": [{"file": "src/config.rs", "description": "The patch includes an unnecessary rename", "confidence": 0.95}], "confidence": 0.95, "recommended_action": "REVISE_PATCH"},
-      "expected": {"verdict": "PARTIAL", "important_findings": ["rename"]}
+      "candidate_patch": {
+        "base_revision": "fixture",
+        "files": [
+          {
+            "path": "src/config.rs",
+            "status": "modified",
+            "patch": "@@ -1 +1 @@\n-fn timeout() -> u64 { 30 }\n+fn request_deadline_seconds() -> u64 { 60 }",
+            "insertions": 1,
+            "deletions": 1,
+            "binary": false
+          }
+        ],
+        "renames": 0,
+        "insertions": 1,
+        "deletions": 1,
+        "binary_files": [],
+        "untracked_files": []
+      },
+      "intended_spec": {
+        "objective": "Increase default timeout",
+        "requirements": [
+          "Set timeout to 60 seconds"
+        ],
+        "non_goals": [
+          "Rename public functions"
+        ],
+        "expected_scope": [
+          "src/config.rs"
+        ]
+      },
+      "mock_echoed_spec": {
+        "apparent_objective": "Increase and rename timeout",
+        "behavior_after": [
+          "Deadline is 60 seconds",
+          "The timeout function is renamed"
+        ],
+        "affected_scope": [
+          "src/config.rs"
+        ],
+        "side_effects": [
+          "Existing callers break"
+        ],
+        "confidence": 0.95
+      },
+      "mock_verdict": {
+        "alignment": "PARTIAL",
+        "agreements": [
+          "The value becomes 60"
+        ],
+        "missing_requirements": [],
+        "unrequested_changes": [
+          "Renames the timeout function"
+        ],
+        "violated_constraints": [],
+        "potential_side_effects": [
+          "Existing callers may fail"
+        ],
+        "uncertainties": [],
+        "evidence": [
+          {
+            "file": "src/config.rs",
+            "description": "The patch includes an unnecessary rename",
+            "confidence": 0.95
+          }
+        ],
+        "confidence": 0.95,
+        "recommended_action": "REVISE_PATCH"
+      },
+      "expected": {
+        "verdict": "PARTIAL",
+        "important_findings": [
+          "rename"
+        ],
+        "finding_category": "unnecessary_refactor",
+        "rationale": "The patch is expected to be PARTIAL because the value becomes 60."
+      },
+      "id": "legacy-09",
+      "subset": "benchmark-v1",
+      "base_state": "Repository files before applying the candidate patch.",
+      "change": "Candidate patch recorded in candidate_patch."
     },
     {
-      "name": "wrong component modified", "class": "wrong_component",
-      "base_files": [{"path": "src/auth.rs", "content": "fn authenticate() { handler(); }\n"}, {"path": "src/ui.rs", "content": "fn label() -> &'static str { \"Login\" }\n"}],
+      "name": "wrong component modified",
+      "class": "wrong_component",
+      "base_files": [
+        {
+          "path": "src/auth.rs",
+          "content": "fn authenticate() { handler(); }\n"
+        },
+        {
+          "path": "src/ui.rs",
+          "content": "fn label() -> &'static str { \"Login\" }\n"
+        }
+      ],
       "original_task": "Reject disabled accounts in the auth handler",
-      "candidate_patch": {"base_revision": "fixture", "files": [{"path": "src/ui.rs", "status": "modified", "patch": "@@ -1 +1 @@\n-fn label() -> &'static str { \"Login\" }\n+fn label() -> &'static str { \"Account login\" }", "insertions": 1, "deletions": 1, "binary": false}], "renames": 0, "insertions": 1, "deletions": 1, "binary_files": [], "untracked_files": []},
-      "intended_spec": {"objective": "Reject disabled accounts", "requirements": ["Check disabled state in the auth handler"], "expected_scope": ["src/auth.rs"]},
-      "mock_echoed_spec": {"apparent_objective": "Change the login label", "behavior_after": ["The UI label changes"], "affected_scope": ["src/ui.rs"], "confidence": 0.98},
-      "mock_verdict": {"alignment": "DIFFERENT", "agreements": [], "missing_requirements": ["The auth handler does not check disabled accounts"], "unrequested_changes": ["Changes a UI label"], "violated_constraints": [], "potential_side_effects": [], "uncertainties": [], "evidence": [{"file": "src/ui.rs", "description": "Only the UI label changed; the auth handler is untouched", "confidence": 0.98}], "confidence": 0.98, "recommended_action": "REVISIT_REASONING"},
-      "expected": {"verdict": "DIFFERENT", "important_findings": ["auth handler"]}
+      "candidate_patch": {
+        "base_revision": "fixture",
+        "files": [
+          {
+            "path": "src/ui.rs",
+            "status": "modified",
+            "patch": "@@ -1 +1 @@\n-fn label() -> &'static str { \"Login\" }\n+fn label() -> &'static str { \"Account login\" }",
+            "insertions": 1,
+            "deletions": 1,
+            "binary": false
+          }
+        ],
+        "renames": 0,
+        "insertions": 1,
+        "deletions": 1,
+        "binary_files": [],
+        "untracked_files": []
+      },
+      "intended_spec": {
+        "objective": "Reject disabled accounts",
+        "requirements": [
+          "Check disabled state in the auth handler"
+        ],
+        "expected_scope": [
+          "src/auth.rs"
+        ]
+      },
+      "mock_echoed_spec": {
+        "apparent_objective": "Change the login label",
+        "behavior_after": [
+          "The UI label changes"
+        ],
+        "affected_scope": [
+          "src/ui.rs"
+        ],
+        "confidence": 0.98
+      },
+      "mock_verdict": {
+        "alignment": "DIFFERENT",
+        "agreements": [],
+        "missing_requirements": [
+          "The auth handler does not check disabled accounts"
+        ],
+        "unrequested_changes": [
+          "Changes a UI label"
+        ],
+        "violated_constraints": [],
+        "potential_side_effects": [],
+        "uncertainties": [],
+        "evidence": [
+          {
+            "file": "src/ui.rs",
+            "description": "Only the UI label changed; the auth handler is untouched",
+            "confidence": 0.98
+          }
+        ],
+        "confidence": 0.98,
+        "recommended_action": "REVISIT_REASONING"
+      },
+      "expected": {
+        "verdict": "DIFFERENT",
+        "important_findings": [
+          "auth handler"
+        ],
+        "finding_category": "wrong_component",
+        "rationale": "The patch is expected to be DIFFERENT because The auth handler does not check disabled accounts."
+      },
+      "id": "legacy-10",
+      "subset": "canonical-5",
+      "base_state": "Repository files before applying the candidate patch.",
+      "change": "Candidate patch recorded in candidate_patch."
+    },
+    {
+      "id": "correct-pagination",
+      "name": "correct pagination",
+      "class": "correct_implementation",
+      "subset": "benchmark-v1",
+      "base_files": [
+        {
+          "path": "api/page.ts",
+          "content": "return {items};\n"
+        }
+      ],
+      "base_state": "api/page.ts contains the pre-change implementation shown in base_files.",
+      "original_task": "Add a next-page cursor without changing existing response fields",
+      "candidate_patch": {
+        "base_revision": "fixture",
+        "files": [
+          {
+            "path": "api/page.ts",
+            "status": "modified",
+            "patch": "@@ -1 +1 @@\n-return {items};\n+return {items, nextCursor: cursor(items)};",
+            "insertions": 1,
+            "deletions": 1,
+            "binary": false
+          }
+        ],
+        "renames": 0,
+        "insertions": 1,
+        "deletions": 1,
+        "binary_files": [],
+        "untracked_files": []
+      },
+      "change": "Replace the implementation in api/page.ts as shown by candidate_patch.",
+      "intended_spec": {
+        "objective": "Expose a next-page cursor",
+        "requirements": [
+          "Add a next-page cursor without changing existing response fields"
+        ],
+        "expected_scope": [
+          "api/page.ts"
+        ]
+      },
+      "mock_echoed_spec": {
+        "apparent_objective": "Expose a next-page cursor",
+        "behavior_after": [
+          "return {items, nextCursor: cursor(items)};"
+        ],
+        "affected_scope": [
+          "api/page.ts"
+        ],
+        "uncertainties": [],
+        "confidence": 0.92
+      },
+      "mock_verdict": {
+        "alignment": "SAME",
+        "agreements": [
+          "Expose a next-page cursor"
+        ],
+        "missing_requirements": [],
+        "unrequested_changes": [],
+        "violated_constraints": [],
+        "potential_side_effects": [],
+        "uncertainties": [],
+        "evidence": [],
+        "confidence": 0.92,
+        "recommended_action": "SHIP"
+      },
+      "expected": {
+        "verdict": "SAME",
+        "important_findings": [],
+        "finding_category": null,
+        "rationale": "Expected SAME: the patch directly implements the requested behavior."
+      }
+    },
+    {
+      "id": "correct-atomic-write",
+      "name": "correct atomic write",
+      "class": "correct_implementation",
+      "subset": "benchmark-v1",
+      "base_files": [
+        {
+          "path": "store/prefs.py",
+          "content": "write(path, data)\n"
+        }
+      ],
+      "base_state": "store/prefs.py contains the pre-change implementation shown in base_files.",
+      "original_task": "Write preferences atomically through a temporary file",
+      "candidate_patch": {
+        "base_revision": "fixture",
+        "files": [
+          {
+            "path": "store/prefs.py",
+            "status": "modified",
+            "patch": "@@ -1 +1 @@\n-write(path, data)\n+write(tmp(path), data); rename(tmp(path), path)",
+            "insertions": 1,
+            "deletions": 1,
+            "binary": false
+          }
+        ],
+        "renames": 0,
+        "insertions": 1,
+        "deletions": 1,
+        "binary_files": [],
+        "untracked_files": []
+      },
+      "change": "Replace the implementation in store/prefs.py as shown by candidate_patch.",
+      "intended_spec": {
+        "objective": "Persist preferences atomically",
+        "requirements": [
+          "Write preferences atomically through a temporary file"
+        ],
+        "expected_scope": [
+          "store/prefs.py"
+        ]
+      },
+      "mock_echoed_spec": {
+        "apparent_objective": "Persist preferences atomically",
+        "behavior_after": [
+          "write(tmp(path), data); rename(tmp(path), path)"
+        ],
+        "affected_scope": [
+          "store/prefs.py"
+        ],
+        "uncertainties": [],
+        "confidence": 0.92
+      },
+      "mock_verdict": {
+        "alignment": "SAME",
+        "agreements": [
+          "Persist preferences atomically"
+        ],
+        "missing_requirements": [],
+        "unrequested_changes": [],
+        "violated_constraints": [],
+        "potential_side_effects": [],
+        "uncertainties": [],
+        "evidence": [],
+        "confidence": 0.92,
+        "recommended_action": "SHIP"
+      },
+      "expected": {
+        "verdict": "SAME",
+        "important_findings": [],
+        "finding_category": null,
+        "rationale": "Expected SAME: the patch directly implements the requested behavior."
+      }
+    },
+    {
+      "id": "correct-casefold",
+      "name": "correct casefold",
+      "class": "correct_implementation",
+      "subset": "benchmark-v1",
+      "base_files": [
+        {
+          "path": "users.go",
+          "content": "return db.Get(name)\n"
+        }
+      ],
+      "base_state": "users.go contains the pre-change implementation shown in base_files.",
+      "original_task": "Make username lookup ASCII case-insensitive",
+      "candidate_patch": {
+        "base_revision": "fixture",
+        "files": [
+          {
+            "path": "users.go",
+            "status": "modified",
+            "patch": "@@ -1 +1 @@\n-return db.Get(name)\n+return db.Get(strings.ToLower(name))",
+            "insertions": 1,
+            "deletions": 1,
+            "binary": false
+          }
+        ],
+        "renames": 0,
+        "insertions": 1,
+        "deletions": 1,
+        "binary_files": [],
+        "untracked_files": []
+      },
+      "change": "Replace the implementation in users.go as shown by candidate_patch.",
+      "intended_spec": {
+        "objective": "Normalize username lookup",
+        "requirements": [
+          "Make username lookup ASCII case-insensitive"
+        ],
+        "expected_scope": [
+          "users.go"
+        ]
+      },
+      "mock_echoed_spec": {
+        "apparent_objective": "Normalize username lookup",
+        "behavior_after": [
+          "return db.Get(strings.ToLower(name))"
+        ],
+        "affected_scope": [
+          "users.go"
+        ],
+        "uncertainties": [],
+        "confidence": 0.92
+      },
+      "mock_verdict": {
+        "alignment": "SAME",
+        "agreements": [
+          "Normalize username lookup"
+        ],
+        "missing_requirements": [],
+        "unrequested_changes": [],
+        "violated_constraints": [],
+        "potential_side_effects": [],
+        "uncertainties": [],
+        "evidence": [],
+        "confidence": 0.92,
+        "recommended_action": "SHIP"
+      },
+      "expected": {
+        "verdict": "SAME",
+        "important_findings": [],
+        "finding_category": null,
+        "rationale": "Expected SAME: the patch directly implements the requested behavior."
+      }
+    },
+    {
+      "id": "partial-audit-fields",
+      "name": "partial audit fields",
+      "class": "partial_implementation",
+      "subset": "benchmark-v1",
+      "base_files": [
+        {
+          "path": "audit.js",
+          "content": "append({action})\n"
+        }
+      ],
+      "base_state": "audit.js contains the pre-change implementation shown in base_files.",
+      "original_task": "Record actor and timestamp in audit entries",
+      "candidate_patch": {
+        "base_revision": "fixture",
+        "files": [
+          {
+            "path": "audit.js",
+            "status": "modified",
+            "patch": "@@ -1 +1 @@\n-append({action})\n+append({action, actor})",
+            "insertions": 1,
+            "deletions": 1,
+            "binary": false
+          }
+        ],
+        "renames": 0,
+        "insertions": 1,
+        "deletions": 1,
+        "binary_files": [],
+        "untracked_files": []
+      },
+      "change": "Replace the implementation in audit.js as shown by candidate_patch.",
+      "intended_spec": {
+        "objective": "Complete audit metadata",
+        "requirements": [
+          "Record actor and timestamp in audit entries"
+        ],
+        "expected_scope": [
+          "audit.js"
+        ]
+      },
+      "mock_echoed_spec": {
+        "apparent_objective": "Complete audit metadata",
+        "behavior_after": [
+          "append({action, actor})"
+        ],
+        "affected_scope": [
+          "audit.js"
+        ],
+        "uncertainties": [],
+        "confidence": 0.92
+      },
+      "mock_verdict": {
+        "alignment": "PARTIAL",
+        "agreements": [
+          "Complete audit metadata"
+        ],
+        "missing_requirements": [
+          "The patch has an important missing requirement issue involving timestamp"
+        ],
+        "unrequested_changes": [],
+        "violated_constraints": [],
+        "potential_side_effects": [],
+        "uncertainties": [],
+        "evidence": [
+          {
+            "file": "audit.js",
+            "description": "The patch has an important missing requirement issue involving timestamp",
+            "confidence": 0.9
+          }
+        ],
+        "confidence": 0.92,
+        "recommended_action": "REVISE_PATCH"
+      },
+      "expected": {
+        "verdict": "PARTIAL",
+        "important_findings": [
+          "timestamp"
+        ],
+        "finding_category": "missing_requirement",
+        "rationale": "Expected PARTIAL: the authored task and patch evidence do not fully align."
+      }
+    },
+    {
+      "id": "partial-two-formats",
+      "name": "partial two formats",
+      "class": "partial_implementation",
+      "subset": "benchmark-v1",
+      "base_files": [
+        {
+          "path": "export.rs",
+          "content": "export_csv(rows)\n"
+        }
+      ],
+      "base_state": "export.rs contains the pre-change implementation shown in base_files.",
+      "original_task": "Export reports as CSV and JSON",
+      "candidate_patch": {
+        "base_revision": "fixture",
+        "files": [
+          {
+            "path": "export.rs",
+            "status": "modified",
+            "patch": "@@ -1 +1 @@\n-export_csv(rows)\n+export_json(rows)",
+            "insertions": 1,
+            "deletions": 1,
+            "binary": false
+          }
+        ],
+        "renames": 0,
+        "insertions": 1,
+        "deletions": 1,
+        "binary_files": [],
+        "untracked_files": []
+      },
+      "change": "Replace the implementation in export.rs as shown by candidate_patch.",
+      "intended_spec": {
+        "objective": "Support both export formats",
+        "requirements": [
+          "Export reports as CSV and JSON"
+        ],
+        "expected_scope": [
+          "export.rs"
+        ]
+      },
+      "mock_echoed_spec": {
+        "apparent_objective": "Support both export formats",
+        "behavior_after": [
+          "export_json(rows)"
+        ],
+        "affected_scope": [
+          "export.rs"
+        ],
+        "uncertainties": [],
+        "confidence": 0.92
+      },
+      "mock_verdict": {
+        "alignment": "PARTIAL",
+        "agreements": [
+          "Support both export formats"
+        ],
+        "missing_requirements": [
+          "The patch has an important missing requirement issue involving CSV"
+        ],
+        "unrequested_changes": [],
+        "violated_constraints": [],
+        "potential_side_effects": [],
+        "uncertainties": [],
+        "evidence": [
+          {
+            "file": "export.rs",
+            "description": "The patch has an important missing requirement issue involving CSV",
+            "confidence": 0.9
+          }
+        ],
+        "confidence": 0.92,
+        "recommended_action": "REVISE_PATCH"
+      },
+      "expected": {
+        "verdict": "PARTIAL",
+        "important_findings": [
+          "csv"
+        ],
+        "finding_category": "missing_requirement",
+        "rationale": "Expected PARTIAL: the authored task and patch evidence do not fully align."
+      }
+    },
+    {
+      "id": "missing-delete-cleanup",
+      "name": "missing delete cleanup",
+      "class": "missing_requirement",
+      "subset": "benchmark-v1",
+      "base_files": [
+        {
+          "path": "account.rb",
+          "content": "accounts.delete(id)\n"
+        }
+      ],
+      "base_state": "account.rb contains the pre-change implementation shown in base_files.",
+      "original_task": "Delete an account and revoke all sessions",
+      "candidate_patch": {
+        "base_revision": "fixture",
+        "files": [
+          {
+            "path": "account.rb",
+            "status": "modified",
+            "patch": "@@ -1 +1 @@\n-accounts.delete(id)\n+accounts.delete(id);",
+            "insertions": 1,
+            "deletions": 1,
+            "binary": false
+          }
+        ],
+        "renames": 0,
+        "insertions": 1,
+        "deletions": 1,
+        "binary_files": [],
+        "untracked_files": []
+      },
+      "change": "Replace the implementation in account.rb as shown by candidate_patch.",
+      "intended_spec": {
+        "objective": "Remove account state",
+        "requirements": [
+          "Delete an account and revoke all sessions"
+        ],
+        "expected_scope": [
+          "account.rb"
+        ]
+      },
+      "mock_echoed_spec": {
+        "apparent_objective": "Remove account state",
+        "behavior_after": [
+          "accounts.delete(id);"
+        ],
+        "affected_scope": [
+          "account.rb"
+        ],
+        "uncertainties": [],
+        "confidence": 0.92
+      },
+      "mock_verdict": {
+        "alignment": "PARTIAL",
+        "agreements": [
+          "Remove account state"
+        ],
+        "missing_requirements": [
+          "The patch has an important missing requirement issue involving sessions"
+        ],
+        "unrequested_changes": [],
+        "violated_constraints": [],
+        "potential_side_effects": [],
+        "uncertainties": [],
+        "evidence": [
+          {
+            "file": "account.rb",
+            "description": "The patch has an important missing requirement issue involving sessions",
+            "confidence": 0.9
+          }
+        ],
+        "confidence": 0.92,
+        "recommended_action": "REVISE_PATCH"
+      },
+      "expected": {
+        "verdict": "PARTIAL",
+        "important_findings": [
+          "sessions"
+        ],
+        "finding_category": "missing_requirement",
+        "rationale": "Expected PARTIAL: the authored task and patch evidence do not fully align."
+      }
+    },
+    {
+      "id": "constraint-no-network",
+      "name": "constraint no network",
+      "class": "violated_constraint",
+      "subset": "benchmark-v1",
+      "base_files": [
+        {
+          "path": "resolver.py",
+          "content": "return local[name]\n"
+        }
+      ],
+      "base_state": "resolver.py contains the pre-change implementation shown in base_files.",
+      "original_task": "Resolve names from the local map without network access",
+      "candidate_patch": {
+        "base_revision": "fixture",
+        "files": [
+          {
+            "path": "resolver.py",
+            "status": "modified",
+            "patch": "@@ -1 +1 @@\n-return local[name]\n+return http.get(\"/resolve/\"+name)",
+            "insertions": 1,
+            "deletions": 1,
+            "binary": false
+          }
+        ],
+        "renames": 0,
+        "insertions": 1,
+        "deletions": 1,
+        "binary_files": [],
+        "untracked_files": []
+      },
+      "change": "Replace the implementation in resolver.py as shown by candidate_patch.",
+      "intended_spec": {
+        "objective": "Resolve local names",
+        "requirements": [
+          "Resolve names from the local map without network access"
+        ],
+        "expected_scope": [
+          "resolver.py"
+        ]
+      },
+      "mock_echoed_spec": {
+        "apparent_objective": "Resolve local names",
+        "behavior_after": [
+          "return http.get(\"/resolve/\"+name)"
+        ],
+        "affected_scope": [
+          "resolver.py"
+        ],
+        "uncertainties": [],
+        "confidence": 0.92
+      },
+      "mock_verdict": {
+        "alignment": "PARTIAL",
+        "agreements": [
+          "Resolve local names"
+        ],
+        "missing_requirements": [],
+        "unrequested_changes": [],
+        "violated_constraints": [
+          "The patch has an important violated constraint issue involving network"
+        ],
+        "potential_side_effects": [],
+        "uncertainties": [],
+        "evidence": [
+          {
+            "file": "resolver.py",
+            "description": "The patch has an important violated constraint issue involving network",
+            "confidence": 0.9
+          }
+        ],
+        "confidence": 0.92,
+        "recommended_action": "REVISE_PATCH"
+      },
+      "expected": {
+        "verdict": "PARTIAL",
+        "important_findings": [
+          "network"
+        ],
+        "finding_category": "violated_constraint",
+        "rationale": "Expected PARTIAL: the authored task and patch evidence do not fully align."
+      }
+    },
+    {
+      "id": "constraint-preserve-order",
+      "name": "constraint preserve order",
+      "class": "violated_constraint",
+      "subset": "benchmark-v1",
+      "base_files": [
+        {
+          "path": "events.js",
+          "content": "return events\n"
+        }
+      ],
+      "base_state": "events.js contains the pre-change implementation shown in base_files.",
+      "original_task": "Deduplicate events while preserving arrival order",
+      "candidate_patch": {
+        "base_revision": "fixture",
+        "files": [
+          {
+            "path": "events.js",
+            "status": "modified",
+            "patch": "@@ -1 +1 @@\n-return events\n+return [...new Set(events)].sort()",
+            "insertions": 1,
+            "deletions": 1,
+            "binary": false
+          }
+        ],
+        "renames": 0,
+        "insertions": 1,
+        "deletions": 1,
+        "binary_files": [],
+        "untracked_files": []
+      },
+      "change": "Replace the implementation in events.js as shown by candidate_patch.",
+      "intended_spec": {
+        "objective": "Deduplicate events",
+        "requirements": [
+          "Deduplicate events while preserving arrival order"
+        ],
+        "expected_scope": [
+          "events.js"
+        ]
+      },
+      "mock_echoed_spec": {
+        "apparent_objective": "Deduplicate events",
+        "behavior_after": [
+          "return [...new Set(events)].sort()"
+        ],
+        "affected_scope": [
+          "events.js"
+        ],
+        "uncertainties": [],
+        "confidence": 0.92
+      },
+      "mock_verdict": {
+        "alignment": "PARTIAL",
+        "agreements": [
+          "Deduplicate events"
+        ],
+        "missing_requirements": [],
+        "unrequested_changes": [],
+        "violated_constraints": [
+          "The patch has an important violated constraint issue involving order"
+        ],
+        "potential_side_effects": [],
+        "uncertainties": [],
+        "evidence": [
+          {
+            "file": "events.js",
+            "description": "The patch has an important violated constraint issue involving order",
+            "confidence": 0.9
+          }
+        ],
+        "confidence": 0.92,
+        "recommended_action": "REVISE_PATCH"
+      },
+      "expected": {
+        "verdict": "PARTIAL",
+        "important_findings": [
+          "order"
+        ],
+        "finding_category": "violated_constraint",
+        "rationale": "Expected PARTIAL: the authored task and patch evidence do not fully align."
+      }
+    },
+    {
+      "id": "scope-telemetry",
+      "name": "scope telemetry",
+      "class": "scope_creep",
+      "subset": "benchmark-v1",
+      "base_files": [
+        {
+          "path": "upload.go",
+          "content": "return send(file)\n"
+        }
+      ],
+      "base_state": "upload.go contains the pre-change implementation shown in base_files.",
+      "original_task": "Retry failed uploads once",
+      "candidate_patch": {
+        "base_revision": "fixture",
+        "files": [
+          {
+            "path": "upload.go",
+            "status": "modified",
+            "patch": "@@ -1 +1 @@\n-return send(file)\n+metrics.Enable(); return retry(send(file), 1)",
+            "insertions": 1,
+            "deletions": 1,
+            "binary": false
+          }
+        ],
+        "renames": 0,
+        "insertions": 1,
+        "deletions": 1,
+        "binary_files": [],
+        "untracked_files": []
+      },
+      "change": "Replace the implementation in upload.go as shown by candidate_patch.",
+      "intended_spec": {
+        "objective": "Retry uploads",
+        "requirements": [
+          "Retry failed uploads once"
+        ],
+        "expected_scope": [
+          "upload.go"
+        ]
+      },
+      "mock_echoed_spec": {
+        "apparent_objective": "Retry uploads",
+        "behavior_after": [
+          "metrics.Enable(); return retry(send(file), 1)"
+        ],
+        "affected_scope": [
+          "upload.go"
+        ],
+        "uncertainties": [],
+        "confidence": 0.92
+      },
+      "mock_verdict": {
+        "alignment": "PARTIAL",
+        "agreements": [
+          "Retry uploads"
+        ],
+        "missing_requirements": [],
+        "unrequested_changes": [
+          "The patch has an important scope creep issue involving telemetry"
+        ],
+        "violated_constraints": [],
+        "potential_side_effects": [],
+        "uncertainties": [],
+        "evidence": [
+          {
+            "file": "upload.go",
+            "description": "The patch has an important scope creep issue involving telemetry",
+            "confidence": 0.9
+          }
+        ],
+        "confidence": 0.92,
+        "recommended_action": "REVISE_PATCH"
+      },
+      "expected": {
+        "verdict": "PARTIAL",
+        "important_findings": [
+          "telemetry"
+        ],
+        "finding_category": "scope_creep",
+        "rationale": "Expected PARTIAL: the authored task and patch evidence do not fully align."
+      }
+    },
+    {
+      "id": "scope-schema-drop",
+      "name": "scope schema drop",
+      "class": "scope_creep",
+      "subset": "benchmark-v1",
+      "base_files": [
+        {
+          "path": "db/migrate.sql",
+          "content": "CREATE TABLE users(id INT, email TEXT);\n"
+        }
+      ],
+      "base_state": "db/migrate.sql contains the pre-change implementation shown in base_files.",
+      "original_task": "Add an index for email lookups",
+      "candidate_patch": {
+        "base_revision": "fixture",
+        "files": [
+          {
+            "path": "db/migrate.sql",
+            "status": "modified",
+            "patch": "@@ -1 +1 @@\n-CREATE TABLE users(id INT, email TEXT);\n+CREATE INDEX users_email ON users(email); DROP TABLE sessions;",
+            "insertions": 1,
+            "deletions": 1,
+            "binary": false
+          }
+        ],
+        "renames": 0,
+        "insertions": 1,
+        "deletions": 1,
+        "binary_files": [],
+        "untracked_files": []
+      },
+      "change": "Replace the implementation in db/migrate.sql as shown by candidate_patch.",
+      "intended_spec": {
+        "objective": "Index email",
+        "requirements": [
+          "Add an index for email lookups"
+        ],
+        "expected_scope": [
+          "db/migrate.sql"
+        ]
+      },
+      "mock_echoed_spec": {
+        "apparent_objective": "Index email",
+        "behavior_after": [
+          "CREATE INDEX users_email ON users(email); DROP TABLE sessions;"
+        ],
+        "affected_scope": [
+          "db/migrate.sql"
+        ],
+        "uncertainties": [],
+        "confidence": 0.92
+      },
+      "mock_verdict": {
+        "alignment": "PARTIAL",
+        "agreements": [
+          "Index email"
+        ],
+        "missing_requirements": [],
+        "unrequested_changes": [
+          "The patch has an important scope creep issue involving sessions"
+        ],
+        "violated_constraints": [],
+        "potential_side_effects": [],
+        "uncertainties": [],
+        "evidence": [
+          {
+            "file": "db/migrate.sql",
+            "description": "The patch has an important scope creep issue involving sessions",
+            "confidence": 0.9
+          }
+        ],
+        "confidence": 0.92,
+        "recommended_action": "REVISE_PATCH"
+      },
+      "expected": {
+        "verdict": "PARTIAL",
+        "important_findings": [
+          "sessions"
+        ],
+        "finding_category": "scope_creep",
+        "rationale": "Expected PARTIAL: the authored task and patch evidence do not fully align."
+      }
+    },
+    {
+      "id": "behavior-default-port",
+      "name": "behavior default port",
+      "class": "unnecessary_behavioral_change",
+      "subset": "benchmark-v1",
+      "base_files": [
+        {
+          "path": "server.toml",
+          "content": "host=\"localhost\"\nport=8080\n"
+        }
+      ],
+      "base_state": "server.toml contains the pre-change implementation shown in base_files.",
+      "original_task": "Accept a configurable host name",
+      "candidate_patch": {
+        "base_revision": "fixture",
+        "files": [
+          {
+            "path": "server.toml",
+            "status": "modified",
+            "patch": "@@ -1 +1 @@\n-host=\"localhost\"\nport=8080\n+host=\"${HOST}\"\nport=80",
+            "insertions": 1,
+            "deletions": 1,
+            "binary": false
+          }
+        ],
+        "renames": 0,
+        "insertions": 1,
+        "deletions": 1,
+        "binary_files": [],
+        "untracked_files": []
+      },
+      "change": "Replace the implementation in server.toml as shown by candidate_patch.",
+      "intended_spec": {
+        "objective": "Configure host",
+        "requirements": [
+          "Accept a configurable host name"
+        ],
+        "expected_scope": [
+          "server.toml"
+        ]
+      },
+      "mock_echoed_spec": {
+        "apparent_objective": "Configure host",
+        "behavior_after": [
+          "host=\"${HOST}\"\nport=80"
+        ],
+        "affected_scope": [
+          "server.toml"
+        ],
+        "uncertainties": [],
+        "confidence": 0.92
+      },
+      "mock_verdict": {
+        "alignment": "PARTIAL",
+        "agreements": [
+          "Configure host"
+        ],
+        "missing_requirements": [],
+        "unrequested_changes": [
+          "The patch has an important unnecessary behavioral change issue involving port"
+        ],
+        "violated_constraints": [],
+        "potential_side_effects": [],
+        "uncertainties": [],
+        "evidence": [
+          {
+            "file": "server.toml",
+            "description": "The patch has an important unnecessary behavioral change issue involving port",
+            "confidence": 0.9
+          }
+        ],
+        "confidence": 0.92,
+        "recommended_action": "REVISE_PATCH"
+      },
+      "expected": {
+        "verdict": "PARTIAL",
+        "important_findings": [
+          "port"
+        ],
+        "finding_category": "unnecessary_behavioral_change",
+        "rationale": "Expected PARTIAL: the authored task and patch evidence do not fully align."
+      }
+    },
+    {
+      "id": "behavior-rounding",
+      "name": "behavior rounding",
+      "class": "unnecessary_behavioral_change",
+      "subset": "benchmark-v1",
+      "base_files": [
+        {
+          "path": "price.ts",
+          "content": "return amount.toFixed(2)\n"
+        }
+      ],
+      "base_state": "price.ts contains the pre-change implementation shown in base_files.",
+      "original_task": "Display the currency symbol before totals",
+      "candidate_patch": {
+        "base_revision": "fixture",
+        "files": [
+          {
+            "path": "price.ts",
+            "status": "modified",
+            "patch": "@@ -1 +1 @@\n-return amount.toFixed(2)\n+return \"$\"+Math.round(amount)",
+            "insertions": 1,
+            "deletions": 1,
+            "binary": false
+          }
+        ],
+        "renames": 0,
+        "insertions": 1,
+        "deletions": 1,
+        "binary_files": [],
+        "untracked_files": []
+      },
+      "change": "Replace the implementation in price.ts as shown by candidate_patch.",
+      "intended_spec": {
+        "objective": "Prefix totals",
+        "requirements": [
+          "Display the currency symbol before totals"
+        ],
+        "expected_scope": [
+          "price.ts"
+        ]
+      },
+      "mock_echoed_spec": {
+        "apparent_objective": "Prefix totals",
+        "behavior_after": [
+          "return \"$\"+Math.round(amount)"
+        ],
+        "affected_scope": [
+          "price.ts"
+        ],
+        "uncertainties": [],
+        "confidence": 0.92
+      },
+      "mock_verdict": {
+        "alignment": "PARTIAL",
+        "agreements": [
+          "Prefix totals"
+        ],
+        "missing_requirements": [],
+        "unrequested_changes": [
+          "The patch has an important unnecessary behavioral change issue involving round"
+        ],
+        "violated_constraints": [],
+        "potential_side_effects": [],
+        "uncertainties": [],
+        "evidence": [
+          {
+            "file": "price.ts",
+            "description": "The patch has an important unnecessary behavioral change issue involving round",
+            "confidence": 0.9
+          }
+        ],
+        "confidence": 0.92,
+        "recommended_action": "REVISE_PATCH"
+      },
+      "expected": {
+        "verdict": "PARTIAL",
+        "important_findings": [
+          "round"
+        ],
+        "finding_category": "unnecessary_behavioral_change",
+        "rationale": "Expected PARTIAL: the authored task and patch evidence do not fully align."
+      }
+    },
+    {
+      "id": "workaround-hardcode",
+      "name": "workaround hardcode",
+      "class": "superficial_workaround",
+      "subset": "benchmark-v1",
+      "base_files": [
+        {
+          "path": "shipping.py",
+          "content": "return 0\n"
+        }
+      ],
+      "base_state": "shipping.py contains the pre-change implementation shown in base_files.",
+      "original_task": "Calculate shipping from package weight",
+      "candidate_patch": {
+        "base_revision": "fixture",
+        "files": [
+          {
+            "path": "shipping.py",
+            "status": "modified",
+            "patch": "@@ -1 +1 @@\n-return 0\n+return 4.99",
+            "insertions": 1,
+            "deletions": 1,
+            "binary": false
+          }
+        ],
+        "renames": 0,
+        "insertions": 1,
+        "deletions": 1,
+        "binary_files": [],
+        "untracked_files": []
+      },
+      "change": "Replace the implementation in shipping.py as shown by candidate_patch.",
+      "intended_spec": {
+        "objective": "Weight-based shipping",
+        "requirements": [
+          "Calculate shipping from package weight"
+        ],
+        "expected_scope": [
+          "shipping.py"
+        ]
+      },
+      "mock_echoed_spec": {
+        "apparent_objective": "Changes shipping.py without accomplishing the requested behavior",
+        "behavior_after": [
+          "return 4.99"
+        ],
+        "affected_scope": [
+          "shipping.py"
+        ],
+        "uncertainties": [],
+        "confidence": 0.92
+      },
+      "mock_verdict": {
+        "alignment": "DIFFERENT",
+        "agreements": [],
+        "missing_requirements": [],
+        "unrequested_changes": [],
+        "violated_constraints": [
+          "The patch has an important superficial workaround issue involving hard-coded"
+        ],
+        "potential_side_effects": [],
+        "uncertainties": [],
+        "evidence": [
+          {
+            "file": "shipping.py",
+            "description": "The patch has an important superficial workaround issue involving hard-coded",
+            "confidence": 0.9
+          }
+        ],
+        "confidence": 0.92,
+        "recommended_action": "REVISIT_REASONING"
+      },
+      "expected": {
+        "verdict": "DIFFERENT",
+        "important_findings": [
+          "hard-coded"
+        ],
+        "finding_category": "superficial_workaround",
+        "rationale": "Expected DIFFERENT: the authored task and patch evidence do not fully align."
+      }
+    },
+    {
+      "id": "workaround-test-name",
+      "name": "workaround test name",
+      "class": "superficial_workaround",
+      "subset": "benchmark-v1",
+      "base_files": [
+        {
+          "path": "email.rs",
+          "content": "return true\n"
+        }
+      ],
+      "base_state": "email.rs contains the pre-change implementation shown in base_files.",
+      "original_task": "Reject malformed email addresses",
+      "candidate_patch": {
+        "base_revision": "fixture",
+        "files": [
+          {
+            "path": "email.rs",
+            "status": "modified",
+            "patch": "@@ -1 +1 @@\n-return true\n+return value != \"bad@test\"",
+            "insertions": 1,
+            "deletions": 1,
+            "binary": false
+          }
+        ],
+        "renames": 0,
+        "insertions": 1,
+        "deletions": 1,
+        "binary_files": [],
+        "untracked_files": []
+      },
+      "change": "Replace the implementation in email.rs as shown by candidate_patch.",
+      "intended_spec": {
+        "objective": "Validate email syntax",
+        "requirements": [
+          "Reject malformed email addresses"
+        ],
+        "expected_scope": [
+          "email.rs"
+        ]
+      },
+      "mock_echoed_spec": {
+        "apparent_objective": "Validate email syntax",
+        "behavior_after": [
+          "return value != \"bad@test\""
+        ],
+        "affected_scope": [
+          "email.rs"
+        ],
+        "uncertainties": [],
+        "confidence": 0.92
+      },
+      "mock_verdict": {
+        "alignment": "PARTIAL",
+        "agreements": [
+          "Validate email syntax"
+        ],
+        "missing_requirements": [],
+        "unrequested_changes": [],
+        "violated_constraints": [
+          "The patch has an important superficial workaround issue involving single"
+        ],
+        "potential_side_effects": [],
+        "uncertainties": [],
+        "evidence": [
+          {
+            "file": "email.rs",
+            "description": "The patch has an important superficial workaround issue involving single",
+            "confidence": 0.9
+          }
+        ],
+        "confidence": 0.92,
+        "recommended_action": "REVISE_PATCH"
+      },
+      "expected": {
+        "verdict": "PARTIAL",
+        "important_findings": [
+          "single"
+        ],
+        "finding_category": "superficial_workaround",
+        "rationale": "Expected PARTIAL: the authored task and patch evidence do not fully align."
+      }
+    },
+    {
+      "id": "wrong-docs",
+      "name": "wrong docs",
+      "class": "wrong_component",
+      "subset": "benchmark-v1",
+      "base_files": [
+        {
+          "path": "docs/upload.md",
+          "content": "Uploads are accepted.\n"
+        }
+      ],
+      "base_state": "docs/upload.md contains the pre-change implementation shown in base_files.",
+      "original_task": "Enforce maximum upload size in the request handler",
+      "candidate_patch": {
+        "base_revision": "fixture",
+        "files": [
+          {
+            "path": "docs/upload.md",
+            "status": "modified",
+            "patch": "@@ -1 +1 @@\n-Uploads are accepted.\n+Uploads above 10MB are rejected.",
+            "insertions": 1,
+            "deletions": 1,
+            "binary": false
+          }
+        ],
+        "renames": 0,
+        "insertions": 1,
+        "deletions": 1,
+        "binary_files": [],
+        "untracked_files": []
+      },
+      "change": "Replace the implementation in docs/upload.md as shown by candidate_patch.",
+      "intended_spec": {
+        "objective": "Enforce upload limit",
+        "requirements": [
+          "Enforce maximum upload size in the request handler"
+        ],
+        "expected_scope": [
+          "docs/upload.md"
+        ]
+      },
+      "mock_echoed_spec": {
+        "apparent_objective": "Changes docs/upload.md without accomplishing the requested behavior",
+        "behavior_after": [
+          "Uploads above 10MB are rejected."
+        ],
+        "affected_scope": [
+          "docs/upload.md"
+        ],
+        "uncertainties": [],
+        "confidence": 0.92
+      },
+      "mock_verdict": {
+        "alignment": "DIFFERENT",
+        "agreements": [],
+        "missing_requirements": [],
+        "unrequested_changes": [],
+        "violated_constraints": [],
+        "potential_side_effects": [
+          "The patch has an important wrong component issue involving handler"
+        ],
+        "uncertainties": [],
+        "evidence": [
+          {
+            "file": "docs/upload.md",
+            "description": "The patch has an important wrong component issue involving handler",
+            "confidence": 0.9
+          }
+        ],
+        "confidence": 0.92,
+        "recommended_action": "REVISIT_REASONING"
+      },
+      "expected": {
+        "verdict": "DIFFERENT",
+        "important_findings": [
+          "handler"
+        ],
+        "finding_category": "wrong_component",
+        "rationale": "Expected DIFFERENT: the authored task and patch evidence do not fully align."
+      }
+    },
+    {
+      "id": "wrong-client-timeout",
+      "name": "wrong client timeout",
+      "class": "wrong_component",
+      "subset": "benchmark-v1",
+      "base_files": [
+        {
+          "path": "web/client.js",
+          "content": "fetch(\"/query\")\n"
+        }
+      ],
+      "base_state": "web/client.js contains the pre-change implementation shown in base_files.",
+      "original_task": "Apply a timeout to database queries",
+      "candidate_patch": {
+        "base_revision": "fixture",
+        "files": [
+          {
+            "path": "web/client.js",
+            "status": "modified",
+            "patch": "@@ -1 +1 @@\n-fetch(\"/query\")\n+fetch(\"/query\", {timeout: 5000})",
+            "insertions": 1,
+            "deletions": 1,
+            "binary": false
+          }
+        ],
+        "renames": 0,
+        "insertions": 1,
+        "deletions": 1,
+        "binary_files": [],
+        "untracked_files": []
+      },
+      "change": "Replace the implementation in web/client.js as shown by candidate_patch.",
+      "intended_spec": {
+        "objective": "Bound database query time",
+        "requirements": [
+          "Apply a timeout to database queries"
+        ],
+        "expected_scope": [
+          "web/client.js"
+        ]
+      },
+      "mock_echoed_spec": {
+        "apparent_objective": "Changes web/client.js without accomplishing the requested behavior",
+        "behavior_after": [
+          "fetch(\"/query\", {timeout: 5000})"
+        ],
+        "affected_scope": [
+          "web/client.js"
+        ],
+        "uncertainties": [],
+        "confidence": 0.92
+      },
+      "mock_verdict": {
+        "alignment": "DIFFERENT",
+        "agreements": [],
+        "missing_requirements": [],
+        "unrequested_changes": [],
+        "violated_constraints": [],
+        "potential_side_effects": [
+          "The patch has an important wrong component issue involving database"
+        ],
+        "uncertainties": [],
+        "evidence": [
+          {
+            "file": "web/client.js",
+            "description": "The patch has an important wrong component issue involving database",
+            "confidence": 0.9
+          }
+        ],
+        "confidence": 0.92,
+        "recommended_action": "REVISIT_REASONING"
+      },
+      "expected": {
+        "verdict": "DIFFERENT",
+        "important_findings": [
+          "database"
+        ],
+        "finding_category": "wrong_component",
+        "rationale": "Expected DIFFERENT: the authored task and patch evidence do not fully align."
+      }
+    },
+    {
+      "id": "different-cache-clear",
+      "name": "different cache clear",
+      "class": "materially_different",
+      "subset": "benchmark-v1",
+      "base_files": [
+        {
+          "path": "cache.kt",
+          "content": "return cached(key)\n"
+        }
+      ],
+      "base_state": "cache.kt contains the pre-change implementation shown in base_files.",
+      "original_task": "Refresh stale cache entries in the background",
+      "candidate_patch": {
+        "base_revision": "fixture",
+        "files": [
+          {
+            "path": "cache.kt",
+            "status": "modified",
+            "patch": "@@ -1 +1 @@\n-return cached(key)\n+cache.clear(); return origin(key)",
+            "insertions": 1,
+            "deletions": 1,
+            "binary": false
+          }
+        ],
+        "renames": 0,
+        "insertions": 1,
+        "deletions": 1,
+        "binary_files": [],
+        "untracked_files": []
+      },
+      "change": "Replace the implementation in cache.kt as shown by candidate_patch.",
+      "intended_spec": {
+        "objective": "Refresh stale entries",
+        "requirements": [
+          "Refresh stale cache entries in the background"
+        ],
+        "expected_scope": [
+          "cache.kt"
+        ]
+      },
+      "mock_echoed_spec": {
+        "apparent_objective": "Changes cache.kt without accomplishing the requested behavior",
+        "behavior_after": [
+          "cache.clear(); return origin(key)"
+        ],
+        "affected_scope": [
+          "cache.kt"
+        ],
+        "uncertainties": [],
+        "confidence": 0.92
+      },
+      "mock_verdict": {
+        "alignment": "DIFFERENT",
+        "agreements": [],
+        "missing_requirements": [],
+        "unrequested_changes": [],
+        "violated_constraints": [],
+        "potential_side_effects": [
+          "The patch has an important materially different issue involving clear"
+        ],
+        "uncertainties": [],
+        "evidence": [
+          {
+            "file": "cache.kt",
+            "description": "The patch has an important materially different issue involving clear",
+            "confidence": 0.9
+          }
+        ],
+        "confidence": 0.92,
+        "recommended_action": "REVISIT_REASONING"
+      },
+      "expected": {
+        "verdict": "DIFFERENT",
+        "important_findings": [
+          "clear"
+        ],
+        "finding_category": "materially_different",
+        "rationale": "Expected DIFFERENT: the authored task and patch evidence do not fully align."
+      }
+    },
+    {
+      "id": "different-encrypt-delete",
+      "name": "different encrypt delete",
+      "class": "materially_different",
+      "subset": "benchmark-v1",
+      "base_files": [
+        {
+          "path": "recovery.py",
+          "content": "save(codes)\n"
+        }
+      ],
+      "base_state": "recovery.py contains the pre-change implementation shown in base_files.",
+      "original_task": "Encrypt stored recovery codes",
+      "candidate_patch": {
+        "base_revision": "fixture",
+        "files": [
+          {
+            "path": "recovery.py",
+            "status": "modified",
+            "patch": "@@ -1 +1 @@\n-save(codes)\n+delete(codes)",
+            "insertions": 1,
+            "deletions": 1,
+            "binary": false
+          }
+        ],
+        "renames": 0,
+        "insertions": 1,
+        "deletions": 1,
+        "binary_files": [],
+        "untracked_files": []
+      },
+      "change": "Replace the implementation in recovery.py as shown by candidate_patch.",
+      "intended_spec": {
+        "objective": "Protect recovery codes",
+        "requirements": [
+          "Encrypt stored recovery codes"
+        ],
+        "expected_scope": [
+          "recovery.py"
+        ]
+      },
+      "mock_echoed_spec": {
+        "apparent_objective": "Changes recovery.py without accomplishing the requested behavior",
+        "behavior_after": [
+          "delete(codes)"
+        ],
+        "affected_scope": [
+          "recovery.py"
+        ],
+        "uncertainties": [],
+        "confidence": 0.92
+      },
+      "mock_verdict": {
+        "alignment": "DIFFERENT",
+        "agreements": [],
+        "missing_requirements": [],
+        "unrequested_changes": [],
+        "violated_constraints": [],
+        "potential_side_effects": [
+          "The patch has an important materially different issue involving delete"
+        ],
+        "uncertainties": [],
+        "evidence": [
+          {
+            "file": "recovery.py",
+            "description": "The patch has an important materially different issue involving delete",
+            "confidence": 0.9
+          }
+        ],
+        "confidence": 0.92,
+        "recommended_action": "REVISIT_REASONING"
+      },
+      "expected": {
+        "verdict": "DIFFERENT",
+        "important_findings": [
+          "delete"
+        ],
+        "finding_category": "materially_different",
+        "rationale": "Expected DIFFERENT: the authored task and patch evidence do not fully align."
+      }
+    },
+    {
+      "id": "opposite-enable",
+      "name": "opposite enable",
+      "class": "semantic_opposite",
+      "subset": "benchmark-v1",
+      "base_files": [
+        {
+          "path": "checkout.ts",
+          "content": "guest=true\n"
+        }
+      ],
+      "base_state": "checkout.ts contains the pre-change implementation shown in base_files.",
+      "original_task": "Disable guest checkout",
+      "candidate_patch": {
+        "base_revision": "fixture",
+        "files": [
+          {
+            "path": "checkout.ts",
+            "status": "modified",
+            "patch": "@@ -1 +1 @@\n-guest=true\n+guest=true // enabled",
+            "insertions": 1,
+            "deletions": 1,
+            "binary": false
+          }
+        ],
+        "renames": 0,
+        "insertions": 1,
+        "deletions": 1,
+        "binary_files": [],
+        "untracked_files": []
+      },
+      "change": "Replace the implementation in checkout.ts as shown by candidate_patch.",
+      "intended_spec": {
+        "objective": "Disable guest checkout",
+        "requirements": [
+          "Disable guest checkout"
+        ],
+        "expected_scope": [
+          "checkout.ts"
+        ]
+      },
+      "mock_echoed_spec": {
+        "apparent_objective": "Changes checkout.ts without accomplishing the requested behavior",
+        "behavior_after": [
+          "guest=true // enabled"
+        ],
+        "affected_scope": [
+          "checkout.ts"
+        ],
+        "uncertainties": [],
+        "confidence": 0.92
+      },
+      "mock_verdict": {
+        "alignment": "DIFFERENT",
+        "agreements": [],
+        "missing_requirements": [],
+        "unrequested_changes": [],
+        "violated_constraints": [
+          "The patch has an important semantic opposite issue involving enabled"
+        ],
+        "potential_side_effects": [],
+        "uncertainties": [],
+        "evidence": [
+          {
+            "file": "checkout.ts",
+            "description": "The patch has an important semantic opposite issue involving enabled",
+            "confidence": 0.9
+          }
+        ],
+        "confidence": 0.92,
+        "recommended_action": "REVISIT_REASONING"
+      },
+      "expected": {
+        "verdict": "DIFFERENT",
+        "important_findings": [
+          "enabled"
+        ],
+        "finding_category": "semantic_opposite",
+        "rationale": "Expected DIFFERENT: the authored task and patch evidence do not fully align."
+      }
+    },
+    {
+      "id": "opposite-sort",
+      "name": "opposite sort",
+      "class": "semantic_opposite",
+      "subset": "benchmark-v1",
+      "base_files": [
+        {
+          "path": "query.sql",
+          "content": "ORDER BY created_at ASC\n"
+        }
+      ],
+      "base_state": "query.sql contains the pre-change implementation shown in base_files.",
+      "original_task": "Sort results newest first",
+      "candidate_patch": {
+        "base_revision": "fixture",
+        "files": [
+          {
+            "path": "query.sql",
+            "status": "modified",
+            "patch": "@@ -1 +1 @@\n-ORDER BY created_at ASC\n+ORDER BY created_at ASC NULLS LAST",
+            "insertions": 1,
+            "deletions": 1,
+            "binary": false
+          }
+        ],
+        "renames": 0,
+        "insertions": 1,
+        "deletions": 1,
+        "binary_files": [],
+        "untracked_files": []
+      },
+      "change": "Replace the implementation in query.sql as shown by candidate_patch.",
+      "intended_spec": {
+        "objective": "Newest-first results",
+        "requirements": [
+          "Sort results newest first"
+        ],
+        "expected_scope": [
+          "query.sql"
+        ]
+      },
+      "mock_echoed_spec": {
+        "apparent_objective": "Changes query.sql without accomplishing the requested behavior",
+        "behavior_after": [
+          "ORDER BY created_at ASC NULLS LAST"
+        ],
+        "affected_scope": [
+          "query.sql"
+        ],
+        "uncertainties": [],
+        "confidence": 0.92
+      },
+      "mock_verdict": {
+        "alignment": "DIFFERENT",
+        "agreements": [],
+        "missing_requirements": [],
+        "unrequested_changes": [],
+        "violated_constraints": [
+          "The patch has an important semantic opposite issue involving ascending"
+        ],
+        "potential_side_effects": [],
+        "uncertainties": [],
+        "evidence": [
+          {
+            "file": "query.sql",
+            "description": "The patch has an important semantic opposite issue involving ascending",
+            "confidence": 0.9
+          }
+        ],
+        "confidence": 0.92,
+        "recommended_action": "REVISIT_REASONING"
+      },
+      "expected": {
+        "verdict": "DIFFERENT",
+        "important_findings": [
+          "ascending"
+        ],
+        "finding_category": "semantic_opposite",
+        "rationale": "Expected DIFFERENT: the authored task and patch evidence do not fully align."
+      }
+    },
+    {
+      "id": "edge-unicode",
+      "name": "edge unicode",
+      "class": "edge_case_omission",
+      "subset": "benchmark-v1",
+      "base_files": [
+        {
+          "path": "length.rs",
+          "content": "s.len()\n"
+        }
+      ],
+      "base_state": "length.rs contains the pre-change implementation shown in base_files.",
+      "original_task": "Count user-visible characters, including Unicode graphemes",
+      "candidate_patch": {
+        "base_revision": "fixture",
+        "files": [
+          {
+            "path": "length.rs",
+            "status": "modified",
+            "patch": "@@ -1 +1 @@\n-s.len()\n+s.chars().count()",
+            "insertions": 1,
+            "deletions": 1,
+            "binary": false
+          }
+        ],
+        "renames": 0,
+        "insertions": 1,
+        "deletions": 1,
+        "binary_files": [],
+        "untracked_files": []
+      },
+      "change": "Replace the implementation in length.rs as shown by candidate_patch.",
+      "intended_spec": {
+        "objective": "Count graphemes",
+        "requirements": [
+          "Count user-visible characters, including Unicode graphemes"
+        ],
+        "expected_scope": [
+          "length.rs"
+        ]
+      },
+      "mock_echoed_spec": {
+        "apparent_objective": "Count graphemes",
+        "behavior_after": [
+          "s.chars().count()"
+        ],
+        "affected_scope": [
+          "length.rs"
+        ],
+        "uncertainties": [],
+        "confidence": 0.92
+      },
+      "mock_verdict": {
+        "alignment": "PARTIAL",
+        "agreements": [
+          "Count graphemes"
+        ],
+        "missing_requirements": [],
+        "unrequested_changes": [],
+        "violated_constraints": [],
+        "potential_side_effects": [
+          "The patch has an important edge case omission issue involving grapheme"
+        ],
+        "uncertainties": [],
+        "evidence": [
+          {
+            "file": "length.rs",
+            "description": "The patch has an important edge case omission issue involving grapheme",
+            "confidence": 0.9
+          }
+        ],
+        "confidence": 0.92,
+        "recommended_action": "REVISE_PATCH"
+      },
+      "expected": {
+        "verdict": "PARTIAL",
+        "important_findings": [
+          "grapheme"
+        ],
+        "finding_category": "edge_case_omission",
+        "rationale": "Expected PARTIAL: the authored task and patch evidence do not fully align."
+      }
+    },
+    {
+      "id": "edge-zero-ttl",
+      "name": "edge zero ttl",
+      "class": "edge_case_omission",
+      "subset": "benchmark-v1",
+      "base_files": [
+        {
+          "path": "ttl.go",
+          "content": "return now.After(expiry)\n"
+        }
+      ],
+      "base_state": "ttl.go contains the pre-change implementation shown in base_files.",
+      "original_task": "Expire cache entries at TTL, including a zero TTL",
+      "candidate_patch": {
+        "base_revision": "fixture",
+        "files": [
+          {
+            "path": "ttl.go",
+            "status": "modified",
+            "patch": "@@ -1 +1 @@\n-return now.After(expiry)\n+return ttl > 0 && now.After(expiry)",
+            "insertions": 1,
+            "deletions": 1,
+            "binary": false
+          }
+        ],
+        "renames": 0,
+        "insertions": 1,
+        "deletions": 1,
+        "binary_files": [],
+        "untracked_files": []
+      },
+      "change": "Replace the implementation in ttl.go as shown by candidate_patch.",
+      "intended_spec": {
+        "objective": "Honor all TTL values",
+        "requirements": [
+          "Expire cache entries at TTL, including a zero TTL"
+        ],
+        "expected_scope": [
+          "ttl.go"
+        ]
+      },
+      "mock_echoed_spec": {
+        "apparent_objective": "Honor all TTL values",
+        "behavior_after": [
+          "return ttl > 0 && now.After(expiry)"
+        ],
+        "affected_scope": [
+          "ttl.go"
+        ],
+        "uncertainties": [],
+        "confidence": 0.92
+      },
+      "mock_verdict": {
+        "alignment": "PARTIAL",
+        "agreements": [
+          "Honor all TTL values"
+        ],
+        "missing_requirements": [],
+        "unrequested_changes": [],
+        "violated_constraints": [],
+        "potential_side_effects": [
+          "The patch has an important edge case omission issue involving zero"
+        ],
+        "uncertainties": [],
+        "evidence": [
+          {
+            "file": "ttl.go",
+            "description": "The patch has an important edge case omission issue involving zero",
+            "confidence": 0.9
+          }
+        ],
+        "confidence": 0.92,
+        "recommended_action": "REVISE_PATCH"
+      },
+      "expected": {
+        "verdict": "PARTIAL",
+        "important_findings": [
+          "zero"
+        ],
+        "finding_category": "edge_case_omission",
+        "rationale": "Expected PARTIAL: the authored task and patch evidence do not fully align."
+      }
+    },
+    {
+      "id": "uncertain-generated",
+      "name": "uncertain generated",
+      "class": "insufficient_evidence",
+      "subset": "benchmark-v1",
+      "base_files": [
+        {
+          "path": "client.gen.ts",
+          "content": "export function call() {}\n"
+        }
+      ],
+      "base_state": "client.gen.ts contains the pre-change implementation shown in base_files.",
+      "original_task": "Update the generated client to match the new service schema",
+      "candidate_patch": {
+        "base_revision": "fixture",
+        "files": [
+          {
+            "path": "client.gen.ts",
+            "status": "modified",
+            "patch": "@@ -1 +1 @@\n-export function call() {}\n+export function callV2() {}",
+            "insertions": 1,
+            "deletions": 1,
+            "binary": false
+          }
+        ],
+        "renames": 0,
+        "insertions": 1,
+        "deletions": 1,
+        "binary_files": [],
+        "untracked_files": []
+      },
+      "change": "Replace the implementation in client.gen.ts as shown by candidate_patch.",
+      "intended_spec": {
+        "objective": "Synchronize generated client",
+        "requirements": [
+          "Update the generated client to match the new service schema"
+        ],
+        "expected_scope": [
+          "client.gen.ts"
+        ]
+      },
+      "mock_echoed_spec": {
+        "apparent_objective": "Synchronize generated client",
+        "behavior_after": [
+          "export function callV2() {}"
+        ],
+        "affected_scope": [
+          "client.gen.ts"
+        ],
+        "uncertainties": [
+          "The patch alone does not establish the requested semantic effect"
+        ],
+        "confidence": 0.45
+      },
+      "mock_verdict": {
+        "alignment": "UNCERTAIN",
+        "agreements": [],
+        "missing_requirements": [],
+        "unrequested_changes": [],
+        "violated_constraints": [],
+        "potential_side_effects": [],
+        "uncertainties": [
+          "Available repository evidence is insufficient to determine alignment"
+        ],
+        "evidence": [],
+        "confidence": 0.45,
+        "recommended_action": "REQUEST_MORE_CONTEXT"
+      },
+      "expected": {
+        "verdict": "UNCERTAIN",
+        "important_findings": [],
+        "finding_category": null,
+        "rationale": "Expected UNCERTAIN: the available diff lacks enough semantic evidence for a reliable judgment."
+      }
+    },
+    {
+      "id": "uncertain-lockfile",
+      "name": "uncertain lockfile",
+      "class": "insufficient_evidence",
+      "subset": "benchmark-v1",
+      "base_files": [
+        {
+          "path": "Cargo.lock",
+          "content": "parser 1.0 checksum aaa\n"
+        }
+      ],
+      "base_state": "Cargo.lock contains the pre-change implementation shown in base_files.",
+      "original_task": "Upgrade the parser dependency to fix nested arrays",
+      "candidate_patch": {
+        "base_revision": "fixture",
+        "files": [
+          {
+            "path": "Cargo.lock",
+            "status": "modified",
+            "patch": "@@ -1 +1 @@\n-parser 1.0 checksum aaa\n+parser 1.1 checksum bbb",
+            "insertions": 1,
+            "deletions": 1,
+            "binary": false
+          }
+        ],
+        "renames": 0,
+        "insertions": 1,
+        "deletions": 1,
+        "binary_files": [],
+        "untracked_files": []
+      },
+      "change": "Replace the implementation in Cargo.lock as shown by candidate_patch.",
+      "intended_spec": {
+        "objective": "Fix nested array parsing",
+        "requirements": [
+          "Upgrade the parser dependency to fix nested arrays"
+        ],
+        "expected_scope": [
+          "Cargo.lock"
+        ]
+      },
+      "mock_echoed_spec": {
+        "apparent_objective": "Fix nested array parsing",
+        "behavior_after": [
+          "parser 1.1 checksum bbb"
+        ],
+        "affected_scope": [
+          "Cargo.lock"
+        ],
+        "uncertainties": [
+          "The patch alone does not establish the requested semantic effect"
+        ],
+        "confidence": 0.45
+      },
+      "mock_verdict": {
+        "alignment": "UNCERTAIN",
+        "agreements": [],
+        "missing_requirements": [],
+        "unrequested_changes": [],
+        "violated_constraints": [],
+        "potential_side_effects": [],
+        "uncertainties": [
+          "Available repository evidence is insufficient to determine alignment"
+        ],
+        "evidence": [],
+        "confidence": 0.45,
+        "recommended_action": "REQUEST_MORE_CONTEXT"
+      },
+      "expected": {
+        "verdict": "UNCERTAIN",
+        "important_findings": [],
+        "finding_category": null,
+        "rationale": "Expected UNCERTAIN: the available diff lacks enough semantic evidence for a reliable judgment."
+      }
+    },
+    {
+      "id": "uncertain-binary",
+      "name": "uncertain binary",
+      "class": "insufficient_evidence",
+      "subset": "benchmark-v1",
+      "base_files": [
+        {
+          "path": "assets/icon.png",
+          "content": "<binary old>\n"
+        }
+      ],
+      "base_state": "assets/icon.png contains the pre-change implementation shown in base_files.",
+      "original_task": "Replace the icon with the accessible high-contrast version",
+      "candidate_patch": {
+        "base_revision": "fixture",
+        "files": [
+          {
+            "path": "assets/icon.png",
+            "status": "modified",
+            "patch": "@@ -1 +1 @@\n-<binary old>\n+<binary changed>",
+            "insertions": 1,
+            "deletions": 1,
+            "binary": true
+          }
+        ],
+        "renames": 0,
+        "insertions": 1,
+        "deletions": 1,
+        "binary_files": [
+          "assets/icon.png"
+        ],
+        "untracked_files": []
+      },
+      "change": "Replace the implementation in assets/icon.png as shown by candidate_patch.",
+      "intended_spec": {
+        "objective": "Improve icon contrast",
+        "requirements": [
+          "Replace the icon with the accessible high-contrast version"
+        ],
+        "expected_scope": [
+          "assets/icon.png"
+        ]
+      },
+      "mock_echoed_spec": {
+        "apparent_objective": "Improve icon contrast",
+        "behavior_after": [
+          "<binary changed>"
+        ],
+        "affected_scope": [
+          "assets/icon.png"
+        ],
+        "uncertainties": [
+          "The patch alone does not establish the requested semantic effect"
+        ],
+        "confidence": 0.45
+      },
+      "mock_verdict": {
+        "alignment": "UNCERTAIN",
+        "agreements": [],
+        "missing_requirements": [],
+        "unrequested_changes": [],
+        "violated_constraints": [],
+        "potential_side_effects": [],
+        "uncertainties": [
+          "Available repository evidence is insufficient to determine alignment"
+        ],
+        "evidence": [],
+        "confidence": 0.45,
+        "recommended_action": "REQUEST_MORE_CONTEXT"
+      },
+      "expected": {
+        "verdict": "UNCERTAIN",
+        "important_findings": [],
+        "finding_category": null,
+        "rationale": "Expected UNCERTAIN: the available diff lacks enough semantic evidence for a reliable judgment."
+      }
+    },
+    {
+      "id": "correct-header",
+      "name": "correct header",
+      "class": "correct_implementation",
+      "subset": "benchmark-v1",
+      "base_files": [
+        {
+          "path": "middleware.cs",
+          "content": "return next(ctx);\n"
+        }
+      ],
+      "base_state": "middleware.cs contains the pre-change implementation shown in base_files.",
+      "original_task": "Add a request ID header to every response",
+      "candidate_patch": {
+        "base_revision": "fixture",
+        "files": [
+          {
+            "path": "middleware.cs",
+            "status": "modified",
+            "patch": "@@ -1 +1 @@\n-return next(ctx);\n+ctx.Response.Headers[\"X-Request-ID\"]=id; return next(ctx);",
+            "insertions": 1,
+            "deletions": 1,
+            "binary": false
+          }
+        ],
+        "renames": 0,
+        "insertions": 1,
+        "deletions": 1,
+        "binary_files": [],
+        "untracked_files": []
+      },
+      "change": "Replace the implementation in middleware.cs as shown by candidate_patch.",
+      "intended_spec": {
+        "objective": "Attach request IDs",
+        "requirements": [
+          "Add a request ID header to every response"
+        ],
+        "expected_scope": [
+          "middleware.cs"
+        ]
+      },
+      "mock_echoed_spec": {
+        "apparent_objective": "Attach request IDs",
+        "behavior_after": [
+          "ctx.Response.Headers[\"X-Request-ID\"]=id; return next(ctx);"
+        ],
+        "affected_scope": [
+          "middleware.cs"
+        ],
+        "uncertainties": [],
+        "confidence": 0.92
+      },
+      "mock_verdict": {
+        "alignment": "SAME",
+        "agreements": [
+          "Attach request IDs"
+        ],
+        "missing_requirements": [],
+        "unrequested_changes": [],
+        "violated_constraints": [],
+        "potential_side_effects": [],
+        "uncertainties": [],
+        "evidence": [],
+        "confidence": 0.92,
+        "recommended_action": "SHIP"
+      },
+      "expected": {
+        "verdict": "SAME",
+        "important_findings": [],
+        "finding_category": null,
+        "rationale": "Expected SAME: the patch directly implements the requested behavior."
+      }
+    },
+    {
+      "id": "correct-cancel",
+      "name": "correct cancel",
+      "class": "correct_implementation",
+      "subset": "benchmark-v1",
+      "base_files": [
+        {
+          "path": "worker.kt",
+          "content": "worker.run(job)\n"
+        }
+      ],
+      "base_state": "worker.kt contains the pre-change implementation shown in base_files.",
+      "original_task": "Propagate cancellation to the worker",
+      "candidate_patch": {
+        "base_revision": "fixture",
+        "files": [
+          {
+            "path": "worker.kt",
+            "status": "modified",
+            "patch": "@@ -1 +1 @@\n-worker.run(job)\n+worker.run(job, context.cancelToken)",
+            "insertions": 1,
+            "deletions": 1,
+            "binary": false
+          }
+        ],
+        "renames": 0,
+        "insertions": 1,
+        "deletions": 1,
+        "binary_files": [],
+        "untracked_files": []
+      },
+      "change": "Replace the implementation in worker.kt as shown by candidate_patch.",
+      "intended_spec": {
+        "objective": "Propagate cancellation",
+        "requirements": [
+          "Propagate cancellation to the worker"
+        ],
+        "expected_scope": [
+          "worker.kt"
+        ]
+      },
+      "mock_echoed_spec": {
+        "apparent_objective": "Propagate cancellation",
+        "behavior_after": [
+          "worker.run(job, context.cancelToken)"
+        ],
+        "affected_scope": [
+          "worker.kt"
+        ],
+        "uncertainties": [],
+        "confidence": 0.92
+      },
+      "mock_verdict": {
+        "alignment": "SAME",
+        "agreements": [
+          "Propagate cancellation"
+        ],
+        "missing_requirements": [],
+        "unrequested_changes": [],
+        "violated_constraints": [],
+        "potential_side_effects": [],
+        "uncertainties": [],
+        "evidence": [],
+        "confidence": 0.92,
+        "recommended_action": "SHIP"
+      },
+      "expected": {
+        "verdict": "SAME",
+        "important_findings": [],
+        "finding_category": null,
+        "rationale": "Expected SAME: the patch directly implements the requested behavior."
+      }
+    },
+    {
+      "id": "partial-log-redact",
+      "name": "partial log redact",
+      "class": "partial_implementation",
+      "subset": "benchmark-v1",
+      "base_files": [
+        {
+          "path": "log.py",
+          "content": "log(payload)\n"
+        }
+      ],
+      "base_state": "log.py contains the pre-change implementation shown in base_files.",
+      "original_task": "Redact passwords and access tokens from logs",
+      "candidate_patch": {
+        "base_revision": "fixture",
+        "files": [
+          {
+            "path": "log.py",
+            "status": "modified",
+            "patch": "@@ -1 +1 @@\n-log(payload)\n+log(redact(payload, \"password\"))",
+            "insertions": 1,
+            "deletions": 1,
+            "binary": false
+          }
+        ],
+        "renames": 0,
+        "insertions": 1,
+        "deletions": 1,
+        "binary_files": [],
+        "untracked_files": []
+      },
+      "change": "Replace the implementation in log.py as shown by candidate_patch.",
+      "intended_spec": {
+        "objective": "Redact secrets",
+        "requirements": [
+          "Redact passwords and access tokens from logs"
+        ],
+        "expected_scope": [
+          "log.py"
+        ]
+      },
+      "mock_echoed_spec": {
+        "apparent_objective": "Redact secrets",
+        "behavior_after": [
+          "log(redact(payload, \"password\"))"
+        ],
+        "affected_scope": [
+          "log.py"
+        ],
+        "uncertainties": [],
+        "confidence": 0.92
+      },
+      "mock_verdict": {
+        "alignment": "PARTIAL",
+        "agreements": [
+          "Redact secrets"
+        ],
+        "missing_requirements": [
+          "The patch has an important missing requirement issue involving access token"
+        ],
+        "unrequested_changes": [],
+        "violated_constraints": [],
+        "potential_side_effects": [],
+        "uncertainties": [],
+        "evidence": [
+          {
+            "file": "log.py",
+            "description": "The patch has an important missing requirement issue involving access token",
+            "confidence": 0.9
+          }
+        ],
+        "confidence": 0.92,
+        "recommended_action": "REVISE_PATCH"
+      },
+      "expected": {
+        "verdict": "PARTIAL",
+        "important_findings": [
+          "access token"
+        ],
+        "finding_category": "missing_requirement",
+        "rationale": "Expected PARTIAL: the authored task and patch evidence do not fully align."
+      }
+    },
+    {
+      "id": "constraint-no-dependency",
+      "name": "constraint no dependency",
+      "class": "violated_constraint",
+      "subset": "benchmark-v1",
+      "base_files": [
+        {
+          "path": "Cargo.toml",
+          "content": "[dependencies]\n"
+        }
+      ],
+      "base_state": "Cargo.toml contains the pre-change implementation shown in base_files.",
+      "original_task": "Parse the flag without adding dependencies",
+      "candidate_patch": {
+        "base_revision": "fixture",
+        "files": [
+          {
+            "path": "Cargo.toml",
+            "status": "modified",
+            "patch": "@@ -1 +1 @@\n-[dependencies]\n+[dependencies]\nclap=\"4\"",
+            "insertions": 1,
+            "deletions": 1,
+            "binary": false
+          }
+        ],
+        "renames": 0,
+        "insertions": 1,
+        "deletions": 1,
+        "binary_files": [],
+        "untracked_files": []
+      },
+      "change": "Replace the implementation in Cargo.toml as shown by candidate_patch.",
+      "intended_spec": {
+        "objective": "Parse a flag",
+        "requirements": [
+          "Parse the flag without adding dependencies"
+        ],
+        "expected_scope": [
+          "Cargo.toml"
+        ]
+      },
+      "mock_echoed_spec": {
+        "apparent_objective": "Parse a flag",
+        "behavior_after": [
+          "[dependencies]\nclap=\"4\""
+        ],
+        "affected_scope": [
+          "Cargo.toml"
+        ],
+        "uncertainties": [],
+        "confidence": 0.92
+      },
+      "mock_verdict": {
+        "alignment": "PARTIAL",
+        "agreements": [
+          "Parse a flag"
+        ],
+        "missing_requirements": [],
+        "unrequested_changes": [],
+        "violated_constraints": [
+          "The patch has an important violated constraint issue involving dependency"
+        ],
+        "potential_side_effects": [],
+        "uncertainties": [],
+        "evidence": [
+          {
+            "file": "Cargo.toml",
+            "description": "The patch has an important violated constraint issue involving dependency",
+            "confidence": 0.9
+          }
+        ],
+        "confidence": 0.92,
+        "recommended_action": "REVISE_PATCH"
+      },
+      "expected": {
+        "verdict": "PARTIAL",
+        "important_findings": [
+          "dependency"
+        ],
+        "finding_category": "violated_constraint",
+        "rationale": "Expected PARTIAL: the authored task and patch evidence do not fully align."
+      }
+    },
+    {
+      "id": "scope-admin-route",
+      "name": "scope admin route",
+      "class": "scope_creep",
+      "subset": "benchmark-v1",
+      "base_files": [
+        {
+          "path": "routes.js",
+          "content": "home=\"Welcom\"\n"
+        }
+      ],
+      "base_state": "routes.js contains the pre-change implementation shown in base_files.",
+      "original_task": "Correct the typo on the home page",
+      "candidate_patch": {
+        "base_revision": "fixture",
+        "files": [
+          {
+            "path": "routes.js",
+            "status": "modified",
+            "patch": "@@ -1 +1 @@\n-home=\"Welcom\"\n+home=\"Welcome\"; admin=\"/admin/debug\"",
+            "insertions": 1,
+            "deletions": 1,
+            "binary": false
+          }
+        ],
+        "renames": 0,
+        "insertions": 1,
+        "deletions": 1,
+        "binary_files": [],
+        "untracked_files": []
+      },
+      "change": "Replace the implementation in routes.js as shown by candidate_patch.",
+      "intended_spec": {
+        "objective": "Correct home copy",
+        "requirements": [
+          "Correct the typo on the home page"
+        ],
+        "expected_scope": [
+          "routes.js"
+        ]
+      },
+      "mock_echoed_spec": {
+        "apparent_objective": "Correct home copy",
+        "behavior_after": [
+          "home=\"Welcome\"; admin=\"/admin/debug\""
+        ],
+        "affected_scope": [
+          "routes.js"
+        ],
+        "uncertainties": [],
+        "confidence": 0.92
+      },
+      "mock_verdict": {
+        "alignment": "PARTIAL",
+        "agreements": [
+          "Correct home copy"
+        ],
+        "missing_requirements": [],
+        "unrequested_changes": [
+          "The patch has an important scope creep issue involving admin"
+        ],
+        "violated_constraints": [],
+        "potential_side_effects": [],
+        "uncertainties": [],
+        "evidence": [
+          {
+            "file": "routes.js",
+            "description": "The patch has an important scope creep issue involving admin",
+            "confidence": 0.9
+          }
+        ],
+        "confidence": 0.92,
+        "recommended_action": "REVISE_PATCH"
+      },
+      "expected": {
+        "verdict": "PARTIAL",
+        "important_findings": [
+          "admin"
+        ],
+        "finding_category": "scope_creep",
+        "rationale": "Expected PARTIAL: the authored task and patch evidence do not fully align."
+      }
     }
   ]
 }

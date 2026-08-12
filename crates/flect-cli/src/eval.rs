@@ -1,5 +1,6 @@
 //! Reproducible offline and explicitly opt-in model evaluation.
 
+use std::collections::BTreeMap;
 use std::fs;
 use std::io::{self, Write};
 use std::path::Path;
@@ -28,11 +29,15 @@ struct Suite {
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct EvalCase {
+    id: String,
     name: String,
     class: String,
+    subset: String,
     base_files: Vec<ContextFile>,
+    base_state: String,
     original_task: String,
     candidate_patch: PatchSet,
+    change: String,
     intended_spec: IntendedSpec,
     mock_echoed_spec: EchoedSpec,
     mock_verdict: Verdict,
@@ -44,6 +49,8 @@ struct EvalCase {
 struct Expected {
     verdict: Alignment,
     important_findings: Vec<String>,
+    finding_category: Option<String>,
+    rationale: String,
 }
 
 #[derive(Debug, Deserialize)]
@@ -96,14 +103,26 @@ struct ProfileSummary {
 #[derive(Debug, Serialize)]
 struct Metrics {
     cases: usize,
+    cases_attempted: usize,
+    cases_persisted: usize,
     exact_verdicts: usize,
+    verdict_accuracy: Rate,
+    per_class_accuracy: BTreeMap<String, Rate>,
+    confusion_matrix: BTreeMap<String, BTreeMap<String, usize>>,
+    verifier_schema_compliance: Rate,
+    judge_schema_compliance: Rate,
     correct_patch_acceptance: Rate,
     bad_patch_detection: Rate,
     false_positives: usize,
+    false_negatives: usize,
     uncertainty: Rate,
     important_findings: Rate,
+    finding_category_accuracy: Rate,
+    evidence_ref_validation_failures: usize,
     requests: usize,
     latency_ms: u64,
+    average_latency_ms: Option<u64>,
+    median_latency_ms: Option<u64>,
     input_tokens: Option<u64>,
     cached_input_tokens: Option<u64>,
     output_tokens: Option<u64>,
@@ -119,6 +138,7 @@ struct Rate {
 
 #[derive(Debug, Serialize)]
 struct CaseResult {
+    id: String,
     name: String,
     class: String,
     expected: Alignment,
@@ -126,6 +146,9 @@ struct CaseResult {
     verdict_match: bool,
     expected_findings: usize,
     matched_findings: usize,
+    expected_finding_category: Option<String>,
+    finding_category_match: Option<bool>,
+    evidence_ref_validation_failures: usize,
     models: Vec<String>,
     requests: usize,
     latency_ms: u64,
@@ -452,6 +475,7 @@ fn case_result(
         .count();
     let usage = aggregate_calls(&output.calls, pricing_base_url);
     CaseResult {
+        id: case.id.clone(),
         name: case.name.clone(),
         class: case.class.clone(),
         expected: case.expected.verdict,
@@ -459,6 +483,26 @@ fn case_result(
         verdict_match: output.verdict.alignment == case.expected.verdict,
         expected_findings: case.expected.important_findings.len(),
         matched_findings,
+        expected_finding_category: case.expected.finding_category.clone(),
+        finding_category_match: case
+            .expected
+            .finding_category
+            .as_ref()
+            .map(|_| matched_findings == case.expected.important_findings.len()),
+        evidence_ref_validation_failures: output
+            .verdict
+            .evidence
+            .iter()
+            .filter(|evidence| {
+                evidence.file.as_ref().is_some_and(|evidence_path| {
+                    !case
+                        .candidate_patch
+                        .files
+                        .iter()
+                        .any(|file| &file.path == evidence_path)
+                })
+            })
+            .count(),
         models: output.calls.iter().map(|call| call.model.clone()).collect(),
         requests: output.calls.len(),
         latency_ms: usage.latency_ms,
@@ -469,6 +513,7 @@ fn case_result(
     }
 }
 
+#[allow(clippy::too_many_lines)]
 fn profile_report(profile: ProfileSummary, cases: Vec<CaseResult>) -> ProfileReport {
     let correct = cases
         .iter()
@@ -494,16 +539,78 @@ fn profile_report(profile: ProfileSummary, cases: Vec<CaseResult>) -> ProfileRep
     let matched_findings = cases.iter().map(|case| case.matched_findings).sum();
     let calls = cases.iter().map(|case| case.requests).sum();
     let latency = cases.iter().map(|case| case.latency_ms).sum();
+    let exact = cases.iter().filter(|case| case.verdict_match).count();
+    let mut per_class_counts = BTreeMap::<String, (usize, usize)>::new();
+    let mut confusion_matrix = BTreeMap::<String, BTreeMap<String, usize>>::new();
+    for label in ["SAME", "PARTIAL", "DIFFERENT", "UNCERTAIN"] {
+        confusion_matrix.insert(
+            label.to_owned(),
+            BTreeMap::from([
+                ("SAME".to_owned(), 0),
+                ("PARTIAL".to_owned(), 0),
+                ("DIFFERENT".to_owned(), 0),
+                ("UNCERTAIN".to_owned(), 0),
+            ]),
+        );
+    }
+    for case in &cases {
+        let count = per_class_counts.entry(case.class.clone()).or_default();
+        count.1 += 1;
+        count.0 += usize::from(case.verdict_match);
+        *confusion_matrix
+            .get_mut(alignment_name(case.expected))
+            .expect("known alignment")
+            .get_mut(alignment_name(case.actual))
+            .expect("known alignment") += 1;
+    }
+    let per_class_accuracy = per_class_counts
+        .into_iter()
+        .map(|(class, (matches, total))| (class, rate(matches, total)))
+        .collect();
+    let category_cases = cases
+        .iter()
+        .filter(|case| case.expected_finding_category.is_some())
+        .count();
+    let category_matches = cases
+        .iter()
+        .filter(|case| case.finding_category_match == Some(true))
+        .count();
+    let evidence_failures = cases
+        .iter()
+        .map(|case| case.evidence_ref_validation_failures)
+        .sum();
+    let mut latencies = cases.iter().map(|case| case.latency_ms).collect::<Vec<_>>();
+    latencies.sort_unstable();
+    let average_latency_ms = u64::try_from(latencies.len())
+        .ok()
+        .filter(|count| *count > 0)
+        .map(|count| latency / count);
+    let median_latency_ms = median(&latencies);
     let metrics = Metrics {
         cases: cases.len(),
-        exact_verdicts: cases.iter().filter(|case| case.verdict_match).count(),
+        cases_attempted: cases.len(),
+        cases_persisted: cases.len(),
+        exact_verdicts: exact,
+        verdict_accuracy: rate(exact, cases.len()),
+        per_class_accuracy,
+        confusion_matrix,
+        verifier_schema_compliance: rate(cases.len() * 2, cases.len() * 2),
+        judge_schema_compliance: rate(cases.len(), cases.len()),
         correct_patch_acceptance: rate(accepted, correct),
         bad_patch_detection: rate(detected, bad),
         false_positives: correct - accepted,
+        false_negatives: cases
+            .iter()
+            .filter(|case| case.expected != Alignment::Same && case.actual == Alignment::Same)
+            .count(),
         uncertainty: rate(uncertain, cases.len()),
         important_findings: rate(matched_findings, expected_findings),
+        finding_category_accuracy: rate(category_matches, category_cases),
+        evidence_ref_validation_failures: evidence_failures,
         requests: calls,
         latency_ms: latency,
+        average_latency_ms,
+        median_latency_ms,
         input_tokens: sum_optional(cases.iter().map(|case| case.input_tokens)),
         cached_input_tokens: sum_optional(cases.iter().map(|case| case.cached_input_tokens)),
         output_tokens: sum_optional(cases.iter().map(|case| case.output_tokens)),
@@ -514,6 +621,27 @@ fn profile_report(profile: ProfileSummary, cases: Vec<CaseResult>) -> ProfileRep
         metrics,
         cases,
     }
+}
+
+fn alignment_name(alignment: Alignment) -> &'static str {
+    match alignment {
+        Alignment::Same => "SAME",
+        Alignment::Partial => "PARTIAL",
+        Alignment::Different => "DIFFERENT",
+        Alignment::Uncertain => "UNCERTAIN",
+    }
+}
+
+fn median(values: &[u64]) -> Option<u64> {
+    if values.is_empty() {
+        return None;
+    }
+    let middle = values.len() / 2;
+    Some(if values.len() % 2 == 0 {
+        values[middle - 1].midpoint(values[middle])
+    } else {
+        values[middle]
+    })
 }
 
 struct CallAggregate {
@@ -632,17 +760,30 @@ fn validate_suite(suite: &Suite) -> Result<()> {
             suite.version
         ));
     }
-    if suite.cases.is_empty() {
-        return Err(miette!("evaluation suite has no cases"));
+    if suite.cases.len() < 30 {
+        return Err(miette!("benchmark v1 requires at least 30 cases"));
     }
+    let mut ids = std::collections::BTreeSet::new();
     for case in &suite.cases {
-        if case.name.trim().is_empty()
+        if !ids.insert(&case.id)
+            || case.id.trim().is_empty()
+            || case.name.trim().is_empty()
             || case.class.trim().is_empty()
+            || case.subset.trim().is_empty()
+            || case.base_state.trim().is_empty()
+            || case.change.trim().is_empty()
             || case.original_task.trim().is_empty()
+            || case.expected.rationale.trim().is_empty()
             || case.base_files.is_empty()
             || case.candidate_patch.files.is_empty()
         {
             return Err(miette!("evaluation case `{}` is incomplete", case.name));
+        }
+        if case.expected.important_findings.is_empty() != case.expected.finding_category.is_none() {
+            return Err(miette!(
+                "evaluation case `{}` has inconsistent finding ground truth",
+                case.name
+            ));
         }
         let serialized = serde_json::to_string(&bundle(case)?).into_diagnostic()?;
         if serialized.contains(&case.original_task) {
@@ -651,6 +792,22 @@ fn validate_suite(suite: &Suite) -> Result<()> {
                 case.name
             ));
         }
+    }
+    let canonical = suite
+        .cases
+        .iter()
+        .filter(|case| case.subset == "canonical-5")
+        .map(|case| (case.class.as_str(), case.expected.verdict))
+        .collect::<Vec<_>>();
+    let expected = vec![
+        ("correct_patch", Alignment::Same),
+        ("partial_implementation", Alignment::Partial),
+        ("scope_creep", Alignment::Partial),
+        ("constraint_violation", Alignment::Partial),
+        ("wrong_component", Alignment::Different),
+    ];
+    if canonical != expected {
+        return Err(miette!("canonical-5 labels or ordering drifted"));
     }
     Ok(())
 }
