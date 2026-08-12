@@ -42,26 +42,23 @@ pub fn materialize_judge_verdict(
     let mut verdict = Verdict {
         alignment: judge.alignment,
         agreements: Vec::new(),
-        missing_requirements: judge.missing_requirements,
-        unrequested_changes: judge.unrequested_changes,
-        violated_constraints: judge.violated_constraints,
-        potential_side_effects: judge.potential_side_effects,
+        missing_requirements: findings_for(&judge, FindingCategory::MissingRequirements),
+        unrequested_changes: findings_for(&judge, FindingCategory::UnrequestedChanges),
+        violated_constraints: findings_for(&judge, FindingCategory::ViolatedConstraints),
+        potential_side_effects: findings_for(&judge, FindingCategory::PotentialSideEffects),
         uncertainties: judge.uncertainties,
         evidence: Vec::new(),
         confidence: judge.confidence.unwrap_or(0.5),
         recommended_action: action_for(judge.alignment),
     };
     let ids = finding_ids_by_category(&verdict);
-    for evidence in judge.evidence {
-        let mut finding_ids = Vec::new();
-        for category in evidence.finding_categories {
-            let category_ids = ids
-                .get(&category)
-                .filter(|ids| !ids.is_empty())
-                .ok_or_else(|| EvidenceError::EmptyFindingCategory(category_name(category)))?;
-            finding_ids.extend(category_ids.iter().cloned());
-        }
-        let (file, patch_hunk, line_start, line_end) = match evidence.hunk_id {
+    for finding in judge.findings {
+        let finding_ids = ids
+            .get(&finding.kind)
+            .filter(|ids| !ids.is_empty())
+            .ok_or_else(|| EvidenceError::EmptyFindingCategory(category_name(finding.kind)))?
+            .clone();
+        let (file, patch_hunk, line_start, line_end) = match finding.evidence_ref {
             Some(id) => resolve_hunk(bundle, &id)?,
             None => (None, None, None, None),
         };
@@ -71,12 +68,21 @@ pub fn materialize_judge_verdict(
             line_end,
             patch_hunk,
             finding_ids,
-            description: evidence.description,
+            description: finding.text,
             confidence: verdict.confidence,
         });
     }
     validate_verdict_evidence(&verdict, bundle)?;
     Ok(verdict)
+}
+
+fn findings_for(judge: &JudgeVerdict, category: FindingCategory) -> Vec<String> {
+    judge
+        .findings
+        .iter()
+        .filter(|finding| finding.kind == category)
+        .map(|finding| finding.text.clone())
+        .collect()
 }
 
 /// Rejects fabricated evidence and inconsistent verdict/action combinations.

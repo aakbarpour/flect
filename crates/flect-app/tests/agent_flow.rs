@@ -5,7 +5,7 @@ use std::process::Command;
 use flect_app::{AgentService, AgentWorkflowError, CleanupOptions};
 use flect_core::{
     AffectedScope, AgentModelSelection, Alignment, BlindAgentSubmission, EchoedSpec,
-    FindingCategory, GitRepository, IntendedSpec, JudgeEvidence, JudgeVerdict,
+    FindingCategory, GitRepository, IntendedSpec, JudgeFinding, JudgeVerdict,
     ReconciliationAgentSubmission, RunRecord, RunStore, TaskInput,
 };
 
@@ -74,12 +74,8 @@ fn complete_agent_handoff_is_blind_validated_and_persisted() {
             job_id: judge.job_id,
             verdict: JudgeVerdict {
                 alignment: Alignment::Same,
-                missing_requirements: Vec::new(),
-                unrequested_changes: Vec::new(),
-                violated_constraints: Vec::new(),
-                potential_side_effects: Vec::new(),
+                findings: Vec::new(),
                 uncertainties: Vec::new(),
-                evidence: Vec::new(),
                 confidence: Some(0.9),
             },
             model: Some("runtime-inherited".to_owned()),
@@ -166,11 +162,11 @@ fn rejects_the_four_observed_judge_wrapper_shapes() {
 #[test]
 fn rejects_fabricated_agent_facing_evidence_fields() {
     for evidence in [
-        serde_json::json!({"finding_categories": ["missing_requirements"], "file": "invented.rs", "description": "x"}),
-        serde_json::json!({"finding_categories": ["missing_requirements"], "line_start": 99, "description": "x"}),
+        serde_json::json!({"kind": "missing_requirement", "text": "x", "file": "invented.rs"}),
+        serde_json::json!({"kind": "missing_requirement", "text": "x", "line_start": 99}),
         serde_json::json!({"finding_ids": ["missing_requirements/99"], "description": "x"}),
     ] {
-        assert!(serde_json::from_value::<JudgeEvidence>(evidence).is_err());
+        assert!(serde_json::from_value::<JudgeFinding>(evidence).is_err());
     }
 }
 
@@ -359,16 +355,12 @@ fn rejects_fabricated_verdict_evidence() {
         job_id: judge.job_id,
         verdict: JudgeVerdict {
             alignment: Alignment::Partial,
-            missing_requirements: vec![finding.clone()],
-            unrequested_changes: Vec::new(),
-            violated_constraints: Vec::new(),
-            potential_side_effects: Vec::new(),
-            uncertainties: Vec::new(),
-            evidence: vec![JudgeEvidence {
-                finding_categories: vec![FindingCategory::MissingRequirements],
-                hunk_id: Some("hunk/999".to_owned()),
-                description: finding,
+            findings: vec![JudgeFinding {
+                kind: FindingCategory::MissingRequirements,
+                text: finding,
+                evidence_ref: Some("hunk/999".to_owned()),
             }],
+            uncertainties: Vec::new(),
             confidence: Some(0.8),
         },
         model: None,

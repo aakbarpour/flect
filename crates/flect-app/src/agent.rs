@@ -17,7 +17,7 @@ use thiserror::Error;
 use crate::{EvidenceError, materialize_judge_verdict};
 
 const VERIFIER_INSTRUCTIONS: &str = "You are the blind Flect verifier. You have not been given the original task. Do not attempt to discover it. Inspect only the supplied sanitized patch evidence. Determine what behavior this patch appears to add, remove, or change. Return only a valid EchoedSpec matching the supplied schema. Each affected_scope entry is an object: file must exactly equal a path in the supplied manifest; symbol is optional descriptive function, class, or region detail and is not a path. Do not perform general style review. Do not invent files, lines, requirements, or motivations. Preserve uncertainty.";
-const JUDGE_INSTRUCTIONS: &str = "You are the Flect reconciliation judge. Return JSON only: one object matching verdict_schema, with no wrapper, prose, Markdown, or extra keys. Compare IntendedSpec with EchoedSpec only. alignment must be one of the allowed values in evidence_contract. Put every negative finding in its matching array. Every nonempty negative-finding category needs evidence that names that category and, when patch-local, a listed stable hunk_id. Never invent a file, hunk ID, range, or finding. SAME has no negative findings or evidence. Flect derives actions, persisted finding IDs, and trusted locations.";
+const JUDGE_INSTRUCTIONS: &str = "You are the Flect reconciliation judge. Return JSON only: one object matching verdict_schema, with no wrapper, prose, Markdown, or extra keys. Make the smallest semantic judgment: alignment, plus zero or more findings. Each finding has kind, text, and optional evidence_ref. Use only kind values and evidence_ref values listed in evidence_contract. Never emit actions, IDs, files, patch text, or line ranges. SAME has zero findings. Flect derives the trusted persisted Verdict.";
 static JOB_SEQUENCE: AtomicU64 = AtomicU64::new(0);
 
 #[derive(Debug, Error)]
@@ -538,21 +538,20 @@ fn evidence_contract(bundle: &BlindBundle) -> Value {
             "DIFFERENT": ["REVISIT_REASONING", "REVISE_BOTH"],
             "UNCERTAIN": ["REQUEST_MORE_CONTEXT"]
         },
-        "available_finding_categories": [
-            "missing_requirements",
-            "unrequested_changes",
-            "violated_constraints",
-            "potential_side_effects"
+        "available_finding_kinds": [
+            "missing_requirement",
+            "unrequested_change",
+            "violated_constraint",
+            "potential_side_effect"
         ],
         "persisted_finding_id_format": "Flect derives <category>/<zero-based-index> from each nonempty submitted category.",
         "rules": [
             "Return the verdict_schema object directly; do not add a verdict wrapper.",
             "recommended_action, file, patch text, line ranges, and persisted finding IDs are derived by Flect and must not be emitted.",
-            "Every nonempty negative-finding category needs an evidence item with that finding_categories value.",
-            "Evidence.hunk_id, when present, must equal one listed stable hunk ID. Omit hunk_id only when no patch location is available.",
-            "SAME requires all negative-finding arrays and evidence to be empty."
+            "Each finding has kind, text, and optional evidence_ref. evidence_ref, when present, must equal one listed stable hunk ID.",
+            "SAME requires findings to be empty."
         ],
-        "evidence_example": files.iter().find_map(|file| file["hunks"].as_array().and_then(|hunks| hunks.first()).map(|hunk| serde_json::json!({"finding_categories": ["violated_constraints"], "hunk_id": hunk["hunk_id"], "description": "The changed setting violates the constraint."}))),
+        "finding_example": files.iter().find_map(|file| file["hunks"].as_array().and_then(|hunks| hunks.first()).map(|hunk| serde_json::json!({"kind": "violated_constraint", "text": "The changed setting violates the constraint.", "evidence_ref": hunk["hunk_id"]}))),
         "files": files
     })
 }

@@ -321,31 +321,21 @@ pub struct Verdict {
 pub struct JudgeVerdict {
     pub alignment: Alignment,
     #[serde(default)]
-    pub missing_requirements: Vec<String>,
-    #[serde(default)]
-    pub unrequested_changes: Vec<String>,
-    #[serde(default)]
-    pub violated_constraints: Vec<String>,
-    #[serde(default)]
-    pub potential_side_effects: Vec<String>,
+    pub findings: Vec<JudgeFinding>,
     #[serde(default)]
     pub uncertainties: Vec<String>,
-    #[serde(default)]
-    pub evidence: Vec<JudgeEvidence>,
     #[serde(default)]
     pub confidence: Option<f64>,
 }
 
-/// A judge's association between negative findings and one trusted patch hunk.
+/// One semantic negative finding from an external reconciliation judge.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
-pub struct JudgeEvidence {
-    /// Categories whose emitted findings this evidence supports.
-    pub finding_categories: Vec<FindingCategory>,
-    /// A stable identifier from the reconciliation job's evidence contract.
+pub struct JudgeFinding {
+    pub kind: FindingCategory,
+    pub text: String,
     #[serde(default)]
-    pub hunk_id: Option<String>,
-    pub description: String,
+    pub evidence_ref: Option<String>,
 }
 
 /// A negative-finding category that Flect expands into stable persisted IDs.
@@ -354,9 +344,13 @@ pub struct JudgeEvidence {
 )]
 #[serde(rename_all = "snake_case")]
 pub enum FindingCategory {
+    #[serde(rename = "missing_requirement")]
     MissingRequirements,
+    #[serde(rename = "unrequested_change")]
     UnrequestedChanges,
+    #[serde(rename = "violated_constraint")]
     ViolatedConstraints,
+    #[serde(rename = "potential_side_effect")]
     PotentialSideEffects,
 }
 
