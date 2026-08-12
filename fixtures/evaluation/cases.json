@@ -148,7 +148,7 @@
         "important_findings": [
           "rate limit"
         ],
-        "finding_category": "partial_implementation",
+        "finding_category": "missing_requirement",
         "rationale": "The patch is expected to be PARTIAL because requests are validated."
       },
       "id": "canonical-02",
@@ -239,7 +239,7 @@
         "important_findings": [
           "logging"
         ],
-        "finding_category": "scope_creep",
+        "finding_category": "unrequested_change",
         "rationale": "The patch is expected to be PARTIAL because cached values are returned."
       },
       "id": "canonical-03",
@@ -329,7 +329,7 @@
         "important_findings": [
           "public api"
         ],
-        "finding_category": "constraint_violation",
+        "finding_category": "violated_constraint",
         "rationale": "The patch is expected to be PARTIAL because parser implementation changes."
       },
       "id": "canonical-04",
@@ -419,7 +419,7 @@
         "important_findings": [
           "memory"
         ],
-        "finding_category": "semantic_workaround",
+        "finding_category": "violated_constraint",
         "rationale": "The patch is expected to be PARTIAL because avoids repeated database calls."
       },
       "id": "canonical-05",
@@ -511,7 +511,7 @@
         "important_findings": [
           "all origins"
         ],
-        "finding_category": "broadened_behavior",
+        "finding_category": "unrequested_change",
         "rationale": "The patch is expected to be PARTIAL because staging becomes allowed."
       },
       "id": "legacy-06",
@@ -603,7 +603,7 @@
         "important_findings": [
           "legacy parser"
         ],
-        "finding_category": "unrelated_removal",
+        "finding_category": "unrequested_change",
         "rationale": "The patch is expected to be DIFFERENT because error text changes."
       },
       "id": "legacy-07",
@@ -690,7 +690,7 @@
         "important_findings": [
           "empty input"
         ],
-        "finding_category": "missing_edge_case",
+        "finding_category": "missing_requirement",
         "rationale": "The patch is expected to be PARTIAL because names are trimmed and lowercased."
       },
       "id": "legacy-08",
@@ -781,7 +781,7 @@
         "important_findings": [
           "rename"
         ],
-        "finding_category": "unnecessary_refactor",
+        "finding_category": "unrequested_change",
         "rationale": "The patch is expected to be PARTIAL because the value becomes 60."
       },
       "id": "legacy-09",
@@ -867,7 +867,7 @@
         "important_findings": [
           "auth handler"
         ],
-        "finding_category": "wrong_component",
+        "finding_category": "missing_requirement",
         "rationale": "The patch is expected to be DIFFERENT because The auth handler does not check disabled accounts."
       },
       "id": "legacy-10",
@@ -1588,7 +1588,7 @@
         "important_findings": [
           "telemetry"
         ],
-        "finding_category": "scope_creep",
+        "finding_category": "unrequested_change",
         "rationale": "Expected PARTIAL: the authored task and patch evidence do not fully align."
       }
     },
@@ -1671,7 +1671,7 @@
         "important_findings": [
           "sessions"
         ],
-        "finding_category": "scope_creep",
+        "finding_category": "unrequested_change",
         "rationale": "Expected PARTIAL: the authored task and patch evidence do not fully align."
       }
     },
@@ -1754,7 +1754,7 @@
         "important_findings": [
           "port"
         ],
-        "finding_category": "unnecessary_behavioral_change",
+        "finding_category": "unrequested_change",
         "rationale": "Expected PARTIAL: the authored task and patch evidence do not fully align."
       }
     },
@@ -1837,7 +1837,7 @@
         "important_findings": [
           "round"
         ],
-        "finding_category": "unnecessary_behavioral_change",
+        "finding_category": "unrequested_change",
         "rationale": "Expected PARTIAL: the authored task and patch evidence do not fully align."
       }
     },
@@ -1918,7 +1918,7 @@
         "important_findings": [
           "hard-coded"
         ],
-        "finding_category": "superficial_workaround",
+        "finding_category": "violated_constraint",
         "rationale": "Expected DIFFERENT: the authored task and patch evidence do not fully align."
       }
     },
@@ -2001,7 +2001,7 @@
         "important_findings": [
           "single"
         ],
-        "finding_category": "superficial_workaround",
+        "finding_category": "violated_constraint",
         "rationale": "Expected PARTIAL: the authored task and patch evidence do not fully align."
       }
     },
@@ -2082,7 +2082,7 @@
         "important_findings": [
           "handler"
         ],
-        "finding_category": "wrong_component",
+        "finding_category": "potential_side_effect",
         "rationale": "Expected DIFFERENT: the authored task and patch evidence do not fully align."
       }
     },
@@ -2163,7 +2163,7 @@
         "important_findings": [
           "database"
         ],
-        "finding_category": "wrong_component",
+        "finding_category": "potential_side_effect",
         "rationale": "Expected DIFFERENT: the authored task and patch evidence do not fully align."
       }
     },
@@ -2244,7 +2244,7 @@
         "important_findings": [
           "clear"
         ],
-        "finding_category": "materially_different",
+        "finding_category": "potential_side_effect",
         "rationale": "Expected DIFFERENT: the authored task and patch evidence do not fully align."
       }
     },
@@ -2325,7 +2325,7 @@
         "important_findings": [
           "delete"
         ],
-        "finding_category": "materially_different",
+        "finding_category": "potential_side_effect",
         "rationale": "Expected DIFFERENT: the authored task and patch evidence do not fully align."
       }
     },
@@ -2406,7 +2406,7 @@
         "important_findings": [
           "enabled"
         ],
-        "finding_category": "semantic_opposite",
+        "finding_category": "violated_constraint",
         "rationale": "Expected DIFFERENT: the authored task and patch evidence do not fully align."
       }
     },
@@ -2487,7 +2487,7 @@
         "important_findings": [
           "ascending"
         ],
-        "finding_category": "semantic_opposite",
+        "finding_category": "violated_constraint",
         "rationale": "Expected DIFFERENT: the authored task and patch evidence do not fully align."
       }
     },
@@ -2570,7 +2570,7 @@
         "important_findings": [
           "grapheme"
         ],
-        "finding_category": "edge_case_omission",
+        "finding_category": "potential_side_effect",
         "rationale": "Expected PARTIAL: the authored task and patch evidence do not fully align."
       }
     },
@@ -2653,7 +2653,7 @@
         "important_findings": [
           "zero"
         ],
-        "finding_category": "edge_case_omission",
+        "finding_category": "potential_side_effect",
         "rationale": "Expected PARTIAL: the authored task and patch evidence do not fully align."
       }
     },
@@ -3275,7 +3275,7 @@
         "important_findings": [
           "admin"
         ],
-        "finding_category": "scope_creep",
+        "finding_category": "unrequested_change",
         "rationale": "Expected PARTIAL: the authored task and patch evidence do not fully align."
       }
     }

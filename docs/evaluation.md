@@ -28,17 +28,21 @@ flect eval --profiles fixtures/evaluation/profiles.example.toml \
   --allow-paid-api --output target/flect-benchmark-real.json
 ```
 
-Both flags are required so paid execution cannot happen implicitly. Each case makes a new forward request, a new blind verifier request, and a new judge request; outputs are not reused between cases. Invalid structured output is not normalized or silently retried. Optional profile escalation is declared configuration and therefore is not an unbiased no-retry run; use an escalation-disabled profile for the canonical real benchmark.
+Both flags are required so paid execution cannot happen implicitly. Each case makes a new forward request, a new blind verifier request, and a new judge request; outputs are not reused between cases. The judge emits the production `JudgeVerdict` contract, and the benchmark calls `materialize_judge_verdict` just like the trusted agent workflow. Invalid structured output and invalid evidence references fail closed; they are not normalized, repaired, or silently retried. Optional profile escalation is declared configuration and therefore is not an unbiased no-retry run; use an escalation-disabled profile for the canonical real benchmark.
 
 The blind verifier receives only the candidate patch, focused base context, manifest, and blindness report. It does **not** receive the original task, conversation, intended/forward spec, branch, commit message, or primary-agent reasoning. The judge receives the independently generated forward spec and blind reconstruction. Repository fixture code is data and is never executed.
 
-The HTTP profile workflow is model-backed but is not itself proof of a Codex-native agent run. A result may be called “Codex-native” only when the configured execution environment actually provides fresh Codex verifier and judge agents and the retained run artifact establishes that fact.
+The HTTP profile workflow is model-backed but is **not Codex-native**. A result may be called “Codex-native” only when the execution environment actually provides fresh Codex verifier and judge agents through the trusted `prepare-blind` / `submit-echo` / `prepare-reconciliation` / `submit-verdict` lifecycle and the retained run artifact establishes that fact. Do not relabel an HTTP run or substitute it when that runtime capability is unavailable.
 
 ## Metrics and failures
 
 JSON and terminal reports cover attempted and persisted cases, verdict accuracy, per-class accuracy, verifier and judge schema compliance, good-patch acceptance, bad-patch detection, false positives and false negatives, `UNCERTAIN` rate, important-finding detection, finding-category accuracy, evidence-reference validation failures, model calls, total/average/median latency, reported tokens, and estimated cost when pricing is supported. The JSON report includes the full 4×4 confusion matrix (`SAME`, `PARTIAL`, `DIFFERENT`, `UNCERTAIN`) and per-case outcomes.
 
-Malformed model output is a benchmark failure. It must be retained under its raw failure category rather than normalized, silently retried, or dropped to improve the score. Evidence references outside candidate-patch paths are counted as validation failures. Unknown usage or pricing stays `null` rather than being invented.
+Malformed model output is a benchmark failure. Every case is attempted independently and retained, including failures. Reports distinguish forward, verifier, and judge schema failures, evidence-validation failures, orchestration failures, and provider/runtime failures. A later stage that could not run is `not_attempted`, not successful. Verifier and judge schema compliance are successful decodes divided by actual attempts at that stage.
+
+Important-finding detection remains coarse, case-authored text-probe matching. Finding-category accuracy is separate: it compares the expected category directly with the categories in the trusted materialized verdict. Evidence references outside the immutable candidate patch are validation failures. Unknown usage or pricing stays `null` rather than being invented.
+
+Earlier Benchmark v1 code had three reporting defects: the API loop propagated a per-case error and aborted the suite; schema compliance was hard-coded to 100% for produced reports; and category accuracy reused text-probe success rather than inspecting emitted categories. It also asked the judge for the larger persisted `Verdict` instead of the compact production contract. These behaviors made a live report look healthier than the underlying run and must not be used for historical performance claims.
 
 ## Integrity rules
 

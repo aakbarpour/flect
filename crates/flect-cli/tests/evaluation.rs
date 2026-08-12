@@ -18,6 +18,9 @@ fn offline_suite_is_reproducible_and_never_requires_api_access() {
     let report: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
     assert_eq!(report["mode"], "offline");
     assert_eq!(report["profiles"][0]["metrics"]["cases"], 40);
+    assert_eq!(report["profiles"][0]["metrics"]["cases_attempted"], 40);
+    assert_eq!(report["profiles"][0]["metrics"]["cases_persisted"], 40);
+    assert_eq!(report["profiles"][0]["metrics"]["cases_failed"], 0);
     assert_eq!(report["profiles"][0]["metrics"]["exact_verdicts"], 40);
     assert_eq!(report["profiles"][0]["metrics"]["requests"], 120);
     assert_eq!(
@@ -27,6 +30,26 @@ fn offline_suite_is_reproducible_and_never_requires_api_access() {
     assert_eq!(
         report["profiles"][0]["metrics"]["estimated_cost_usd"],
         serde_json::Value::Null
+    );
+    assert_eq!(
+        report["profiles"][0]["metrics"]["verifier_schema_compliance"]["numerator"],
+        40
+    );
+    assert_eq!(
+        report["profiles"][0]["metrics"]["judge_schema_compliance"]["numerator"],
+        40
+    );
+    assert!(
+        report["profiles"][0]["cases"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|case| {
+                case["verifier_schema_status"] == "succeeded"
+                    && case["judge_schema_status"] == "succeeded"
+                    && case["evidence_validation_status"] == "succeeded"
+                    && case["failure_category"].is_null()
+            })
     );
 
     let serialized = serde_json::to_string(&report).unwrap();
