@@ -1,6 +1,7 @@
 //! Flect command-line entry point.
 
 mod app;
+mod eval;
 mod mcp;
 mod report;
 mod skill;
@@ -85,6 +86,21 @@ enum Command {
     Doctor,
     /// Serve Flect tools over the Model Context Protocol on stdio.
     Mcp,
+    /// Run the reproducible semantic-verification evaluation suite.
+    Eval {
+        /// Evaluation suite JSON file.
+        #[arg(long, default_value = "fixtures/evaluation/cases.json")]
+        suite: PathBuf,
+        /// API profile TOML file. Omit for deterministic offline evaluation.
+        #[arg(long, value_name = "PATH")]
+        profiles: Option<PathBuf>,
+        /// Explicitly permit model-backed requests that may incur charges.
+        #[arg(long, requires = "profiles")]
+        allow_paid_api: bool,
+        /// Write the complete JSON report to this path.
+        #[arg(long, value_name = "PATH")]
+        output: Option<PathBuf>,
+    },
     /// Manage the project-local Codex Skill integration.
     Skill {
         #[command(subcommand)]

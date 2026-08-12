@@ -1,0 +1,105 @@
+{
+  "version": 1,
+  "cases": [
+    {
+      "name": "correct patch", "class": "correct_patch",
+      "base_files": [{"path": "src/auth.rs", "content": "fn valid(token: &Token) -> bool { true }\n"}],
+      "original_task": "Reject expired tokens in the auth validator",
+      "candidate_patch": {"base_revision": "fixture", "files": [{"path": "src/auth.rs", "status": "modified", "patch": "@@ -1 +1 @@\n-fn valid(token: &Token) -> bool { true }\n+fn valid(token: &Token) -> bool { !token.expired() }", "insertions": 1, "deletions": 1, "binary": false}], "renames": 0, "insertions": 1, "deletions": 1, "binary_files": [], "untracked_files": []},
+      "intended_spec": {"objective": "Reject expired tokens", "requirements": ["Reject expired tokens"], "expected_scope": ["src/auth.rs"]},
+      "mock_echoed_spec": {"apparent_objective": "Reject expired tokens", "behavior_after": ["Expired tokens are rejected"], "affected_scope": ["src/auth.rs"], "confidence": 0.95},
+      "mock_verdict": {"alignment": "SAME", "agreements": ["Expired tokens are rejected"], "missing_requirements": [], "unrequested_changes": [], "violated_constraints": [], "potential_side_effects": [], "uncertainties": [], "evidence": [], "confidence": 0.95, "recommended_action": "SHIP"},
+      "expected": {"verdict": "SAME", "important_findings": []}
+    },
+    {
+      "name": "partial implementation", "class": "partial_implementation",
+      "base_files": [{"path": "src/api.rs", "content": "fn handle(req: Request) -> Response { process(req) }\n"}],
+      "original_task": "Validate requests and enforce the rate limit",
+      "candidate_patch": {"base_revision": "fixture", "files": [{"path": "src/api.rs", "status": "modified", "patch": "@@ -1 +1 @@\n-fn handle(req: Request) -> Response { process(req) }\n+fn handle(req: Request) -> Response { validate(&req); process(req) }", "insertions": 1, "deletions": 1, "binary": false}], "renames": 0, "insertions": 1, "deletions": 1, "binary_files": [], "untracked_files": []},
+      "intended_spec": {"objective": "Validate and rate-limit requests", "requirements": ["Validate requests", "Enforce the rate limit"], "expected_scope": ["src/api.rs"]},
+      "mock_echoed_spec": {"apparent_objective": "Validate requests", "behavior_after": ["Requests are validated"], "affected_scope": ["src/api.rs"], "confidence": 0.9},
+      "mock_verdict": {"alignment": "PARTIAL", "agreements": ["Requests are validated"], "missing_requirements": ["The rate limit is not enforced"], "unrequested_changes": [], "violated_constraints": [], "potential_side_effects": [], "uncertainties": [], "evidence": [{"file": "src/api.rs", "description": "The patch adds validation but no rate limit", "confidence": 0.9}], "confidence": 0.9, "recommended_action": "REVISE_PATCH"},
+      "expected": {"verdict": "PARTIAL", "important_findings": ["rate limit"]}
+    },
+    {
+      "name": "scope creep", "class": "scope_creep",
+      "base_files": [{"path": "src/cache.rs", "content": "fn get(key: &str) -> Value { load(key) }\n"}],
+      "original_task": "Return cached values for known keys",
+      "candidate_patch": {"base_revision": "fixture", "files": [{"path": "src/cache.rs", "status": "modified", "patch": "@@ -1 +1 @@\n-fn get(key: &str) -> Value { load(key) }\n+fn get(key: &str) -> Value { log::info!(\"{key}\"); cache(key) }", "insertions": 1, "deletions": 1, "binary": false}], "renames": 0, "insertions": 1, "deletions": 1, "binary_files": [], "untracked_files": []},
+      "intended_spec": {"objective": "Use cached values", "requirements": ["Return cached values"], "non_goals": ["Add request logging"], "expected_scope": ["src/cache.rs"]},
+      "mock_echoed_spec": {"apparent_objective": "Cache values and log keys", "behavior_after": ["Cached values are returned", "Every key is logged"], "affected_scope": ["src/cache.rs"], "side_effects": ["Logs cache keys"], "confidence": 0.9},
+      "mock_verdict": {"alignment": "PARTIAL", "agreements": ["Cached values are returned"], "missing_requirements": [], "unrequested_changes": ["Adds logging of cache keys"], "violated_constraints": [], "potential_side_effects": ["Keys may contain sensitive values"], "uncertainties": [], "evidence": [{"file": "src/cache.rs", "description": "Logging was added outside requested scope", "confidence": 0.9}], "confidence": 0.9, "recommended_action": "REVISE_PATCH"},
+      "expected": {"verdict": "PARTIAL", "important_findings": ["logging"]}
+    },
+    {
+      "name": "constraint violation", "class": "constraint_violation",
+      "base_files": [{"path": "src/lib.rs", "content": "pub fn parse(v: &str) -> Item { old_parse(v) }\n"}],
+      "original_task": "Speed up parsing without changing the public API",
+      "candidate_patch": {"base_revision": "fixture", "files": [{"path": "src/lib.rs", "status": "modified", "patch": "@@ -1 +1 @@\n-pub fn parse(v: &str) -> Item { old_parse(v) }\n+pub fn parse(v: Bytes) -> Item { fast_parse(v) }", "insertions": 1, "deletions": 1, "binary": false}], "renames": 0, "insertions": 1, "deletions": 1, "binary_files": [], "untracked_files": []},
+      "intended_spec": {"objective": "Speed up parsing", "requirements": ["Improve parser performance"], "constraints": ["Do not change the public API"], "expected_scope": ["src/lib.rs"]},
+      "mock_echoed_spec": {"apparent_objective": "Use a faster parser", "behavior_after": ["Parsing uses bytes"], "affected_scope": ["src/lib.rs"], "side_effects": ["The public input type changes"], "confidence": 0.95},
+      "mock_verdict": {"alignment": "PARTIAL", "agreements": ["Parser implementation changes"], "missing_requirements": [], "unrequested_changes": [], "violated_constraints": ["Changes the public API from string to bytes"], "potential_side_effects": ["Callers must migrate"], "uncertainties": [], "evidence": [{"file": "src/lib.rs", "description": "The public API parameter type changed", "confidence": 0.95}], "confidence": 0.95, "recommended_action": "REVISE_PATCH"},
+      "expected": {"verdict": "PARTIAL", "important_findings": ["public api"]}
+    },
+    {
+      "name": "semantic workaround", "class": "semantic_workaround",
+      "base_files": [{"path": "src/search.rs", "content": "fn search(q: &str) -> Vec<Row> { db_search(q) }\n"}],
+      "original_task": "Make repeated searches faster",
+      "candidate_patch": {"base_revision": "fixture", "files": [{"path": "src/search.rs", "status": "modified", "patch": "@@ -1 +1 @@\n-fn search(q: &str) -> Vec<Row> { db_search(q) }\n+fn search(q: &str) -> Vec<Row> { ALL_ROWS.clone().filter(q) }", "insertions": 1, "deletions": 1, "binary": false}], "renames": 0, "insertions": 1, "deletions": 1, "binary_files": [], "untracked_files": []},
+      "intended_spec": {"objective": "Make repeated searches faster", "requirements": ["Reduce repeated search latency"], "constraints": ["Do not load the whole dataset into memory"], "expected_scope": ["src/search.rs"]},
+      "mock_echoed_spec": {"apparent_objective": "Search an in-memory copy", "behavior_after": ["All rows are cloned then filtered"], "affected_scope": ["src/search.rs"], "side_effects": ["Memory grows with the dataset"], "confidence": 0.9},
+      "mock_verdict": {"alignment": "PARTIAL", "agreements": ["Avoids repeated database calls"], "missing_requirements": [], "unrequested_changes": [], "violated_constraints": ["Loads the dataset into memory"], "potential_side_effects": ["Unbounded memory growth"], "uncertainties": [], "evidence": [{"file": "src/search.rs", "description": "The workaround clones all rows into memory", "confidence": 0.9}], "confidence": 0.9, "recommended_action": "REVISE_PATCH"},
+      "expected": {"verdict": "PARTIAL", "important_findings": ["memory"]}
+    },
+    {
+      "name": "broadened behavior", "class": "broadened_behavior",
+      "base_files": [{"path": "src/cors.rs", "content": "fn allowed(origin: &str) -> bool { origin == TRUSTED }\n"}],
+      "original_task": "Allow the staging origin in CORS",
+      "candidate_patch": {"base_revision": "fixture", "files": [{"path": "src/cors.rs", "status": "modified", "patch": "@@ -1 +1 @@\n-fn allowed(origin: &str) -> bool { origin == TRUSTED }\n+fn allowed(_origin: &str) -> bool { true }", "insertions": 1, "deletions": 1, "binary": false}], "renames": 0, "insertions": 1, "deletions": 1, "binary_files": [], "untracked_files": []},
+      "intended_spec": {"objective": "Allow staging CORS", "requirements": ["Allow the staging origin"], "constraints": ["Keep other origins denied"], "expected_scope": ["src/cors.rs"]},
+      "mock_echoed_spec": {"apparent_objective": "Allow every origin", "behavior_after": ["All origins are allowed"], "affected_scope": ["src/cors.rs"], "side_effects": ["CORS restrictions are disabled"], "confidence": 0.98},
+      "mock_verdict": {"alignment": "PARTIAL", "agreements": ["Staging becomes allowed"], "missing_requirements": [], "unrequested_changes": ["Allows all origins"], "violated_constraints": ["Other origins are no longer denied"], "potential_side_effects": ["CORS protection is disabled"], "uncertainties": [], "evidence": [{"file": "src/cors.rs", "description": "The function now returns true for all origins", "confidence": 0.98}], "confidence": 0.98, "recommended_action": "REVISE_PATCH"},
+      "expected": {"verdict": "PARTIAL", "important_findings": ["all origins"]}
+    },
+    {
+      "name": "unrelated behavior removal", "class": "unrelated_removal",
+      "base_files": [{"path": "src/parser.rs", "content": "fn parse(v: &str) { modern(v).or_else(|| legacy(v)); }\n"}],
+      "original_task": "Improve the modern parser error message",
+      "candidate_patch": {"base_revision": "fixture", "files": [{"path": "src/parser.rs", "status": "modified", "patch": "@@ -1 +1 @@\n-fn parse(v: &str) { modern(v).or_else(|| legacy(v)); }\n+fn parse(v: &str) { modern(v).expect(\"invalid modern input\"); }", "insertions": 1, "deletions": 1, "binary": false}], "renames": 0, "insertions": 1, "deletions": 1, "binary_files": [], "untracked_files": []},
+      "intended_spec": {"objective": "Improve modern parser errors", "requirements": ["Improve the error message"], "constraints": ["Preserve legacy parsing"], "expected_scope": ["src/parser.rs"]},
+      "mock_echoed_spec": {"apparent_objective": "Fail modern parsing with a new message", "behavior_after": ["Modern failures abort"], "affected_scope": ["src/parser.rs"], "side_effects": ["Legacy parsing is removed"], "confidence": 0.95},
+      "mock_verdict": {"alignment": "DIFFERENT", "agreements": ["Error text changes"], "missing_requirements": [], "unrequested_changes": ["Removes the legacy parser fallback"], "violated_constraints": ["Legacy parsing is not preserved"], "potential_side_effects": ["Legacy inputs fail"], "uncertainties": [], "evidence": [{"file": "src/parser.rs", "description": "The legacy parser call was removed", "confidence": 0.95}], "confidence": 0.95, "recommended_action": "REVISIT_REASONING"},
+      "expected": {"verdict": "DIFFERENT", "important_findings": ["legacy parser"]}
+    },
+    {
+      "name": "missing edge case", "class": "missing_edge_case",
+      "base_files": [{"path": "src/name.rs", "content": "fn normalize(v: &str) -> String { v.to_string() }\n"}],
+      "original_task": "Trim and lowercase names, preserving empty input",
+      "candidate_patch": {"base_revision": "fixture", "files": [{"path": "src/name.rs", "status": "modified", "patch": "@@ -1 +1 @@\n-fn normalize(v: &str) -> String { v.to_string() }\n+fn normalize(v: &str) -> String { assert!(!v.is_empty()); v.trim().to_lowercase() }", "insertions": 1, "deletions": 1, "binary": false}], "renames": 0, "insertions": 1, "deletions": 1, "binary_files": [], "untracked_files": []},
+      "intended_spec": {"objective": "Normalize names", "requirements": ["Trim names", "Lowercase names", "Preserve empty input"], "expected_scope": ["src/name.rs"]},
+      "mock_echoed_spec": {"apparent_objective": "Normalize non-empty names", "behavior_after": ["Names are trimmed and lowercased", "Empty input panics"], "affected_scope": ["src/name.rs"], "confidence": 0.95},
+      "mock_verdict": {"alignment": "PARTIAL", "agreements": ["Names are trimmed and lowercased"], "missing_requirements": ["Empty input is not preserved"], "unrequested_changes": [], "violated_constraints": [], "potential_side_effects": ["Empty input panics"], "uncertainties": [], "evidence": [{"file": "src/name.rs", "description": "An assertion rejects empty input", "confidence": 0.95}], "confidence": 0.95, "recommended_action": "REVISE_PATCH"},
+      "expected": {"verdict": "PARTIAL", "important_findings": ["empty input"]}
+    },
+    {
+      "name": "unnecessary refactor", "class": "unnecessary_refactor",
+      "base_files": [{"path": "src/config.rs", "content": "fn timeout() -> u64 { 30 }\n"}],
+      "original_task": "Increase the default timeout to 60 seconds",
+      "candidate_patch": {"base_revision": "fixture", "files": [{"path": "src/config.rs", "status": "modified", "patch": "@@ -1 +1 @@\n-fn timeout() -> u64 { 30 }\n+fn request_deadline_seconds() -> u64 { 60 }", "insertions": 1, "deletions": 1, "binary": false}], "renames": 0, "insertions": 1, "deletions": 1, "binary_files": [], "untracked_files": []},
+      "intended_spec": {"objective": "Increase default timeout", "requirements": ["Set timeout to 60 seconds"], "non_goals": ["Rename public functions"], "expected_scope": ["src/config.rs"]},
+      "mock_echoed_spec": {"apparent_objective": "Increase and rename timeout", "behavior_after": ["Deadline is 60 seconds", "The timeout function is renamed"], "affected_scope": ["src/config.rs"], "side_effects": ["Existing callers break"], "confidence": 0.95},
+      "mock_verdict": {"alignment": "PARTIAL", "agreements": ["The value becomes 60"], "missing_requirements": [], "unrequested_changes": ["Renames the timeout function"], "violated_constraints": [], "potential_side_effects": ["Existing callers may fail"], "uncertainties": [], "evidence": [{"file": "src/config.rs", "description": "The patch includes an unnecessary rename", "confidence": 0.95}], "confidence": 0.95, "recommended_action": "REVISE_PATCH"},
+      "expected": {"verdict": "PARTIAL", "important_findings": ["rename"]}
+    },
+    {
+      "name": "wrong component modified", "class": "wrong_component",
+      "base_files": [{"path": "src/auth.rs", "content": "fn authenticate() { handler(); }\n"}, {"path": "src/ui.rs", "content": "fn label() -> &'static str { \"Login\" }\n"}],
+      "original_task": "Reject disabled accounts in the auth handler",
+      "candidate_patch": {"base_revision": "fixture", "files": [{"path": "src/ui.rs", "status": "modified", "patch": "@@ -1 +1 @@\n-fn label() -> &'static str { \"Login\" }\n+fn label() -> &'static str { \"Account login\" }", "insertions": 1, "deletions": 1, "binary": false}], "renames": 0, "insertions": 1, "deletions": 1, "binary_files": [], "untracked_files": []},
+      "intended_spec": {"objective": "Reject disabled accounts", "requirements": ["Check disabled state in the auth handler"], "expected_scope": ["src/auth.rs"]},
+      "mock_echoed_spec": {"apparent_objective": "Change the login label", "behavior_after": ["The UI label changes"], "affected_scope": ["src/ui.rs"], "confidence": 0.98},
+      "mock_verdict": {"alignment": "DIFFERENT", "agreements": [], "missing_requirements": ["The auth handler does not check disabled accounts"], "unrequested_changes": ["Changes a UI label"], "violated_constraints": [], "potential_side_effects": [], "uncertainties": [], "evidence": [{"file": "src/ui.rs", "description": "Only the UI label changed; the auth handler is untouched", "confidence": 0.98}], "confidence": 0.98, "recommended_action": "REVISIT_REASONING"},
+      "expected": {"verdict": "DIFFERENT", "important_findings": ["auth handler"]}
+    }
+  ]
+}

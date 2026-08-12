@@ -129,6 +129,7 @@ Dry-run output includes the provider, model, context policy, included patch/cont
 - `flect echo [REVISION]` — describe a patch without needing an original task.
 - `flect doctor` — check Git, repository discovery, configuration, and runner readiness.
 - `flect mcp` — serve the five Flect tools over stdio MCP.
+- `flect eval` — run deterministic fixtures or an explicitly opt-in model comparison.
 - `flect skill install|status|uninstall` — safely manage the project-local Codex Skill.
 
 Every command supports `--json`. Use `--verbose` or `--verbose --verbose` for internal diagnostics; complete model payloads are not logged.
@@ -149,6 +150,10 @@ The Skill orchestrates the CLI lifecycle but does not perform verification itsel
 ## Codex MCP
 
 `flect mcp` exposes `flect_start`, `flect_inspect`, `flect_echo`, `flect_verify`, and `flect_get_result` through a local stdio server. It delegates to the same CLI pipeline and state store rather than maintaining separate verification behavior. See [Codex MCP integration](docs/mcp.md) for current CLI and `.codex/config.toml` setup.
+
+## Evaluation
+
+`flect eval` runs ten deterministic repository-level cases without an API key. Model-backed comparison is available only with both a reviewed profiles file and `--allow-paid-api`; the example compares Luna, Luna with bounded Terra escalation, and Terra. See [evaluation methodology](docs/evaluation.md) before interpreting results.
 
 ## Design and safety
 
