@@ -13,6 +13,7 @@ path = "src/main.rs"
 [dependencies]
 clap.workspace = true
 flect-core.workspace = true
+flect-app.workspace = true
 flect-runner.workspace = true
 miette.workspace = true
 schemars.workspace = true

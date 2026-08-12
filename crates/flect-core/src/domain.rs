@@ -307,7 +307,83 @@ pub struct VerificationRecord {
     pub bundle: BlindBundle,
     pub echoed_spec: EchoedSpec,
     pub verdict: Verdict,
+    #[serde(default)]
+    pub isolation: IsolationLevel,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub model_calls: Vec<ModelCallRecord>,
     pub verified_unix_ms: u64,
+}
+
+/// Assurance level actually established for a semantic reasoner.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum IsolationLevel {
+    Strict,
+    Structural,
+    Soft,
+    #[default]
+    Unknown,
+}
+
+/// How a Codex runtime selected the model used for an agent job.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum AgentModelSelection {
+    Explicit,
+    Inherited,
+    #[default]
+    Unknown,
+}
+
+/// Trusted handoff prepared for a blind external reasoner.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct BlindAgentJob {
+    pub version: u32,
+    pub job_id: String,
+    pub run_id: String,
+    pub isolation: IsolationLevel,
+    pub workspace: String,
+    pub instructions: String,
+    pub bundle: BlindBundle,
+    pub echoed_spec_schema: serde_json::Value,
+    pub allowed_resources: Vec<String>,
+    pub excluded_resources: Vec<String>,
+}
+
+/// Typed response submitted by a blind reasoner.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct BlindAgentSubmission {
+    pub job_id: String,
+    pub echoed_spec: EchoedSpec,
+    pub model: Option<String>,
+    #[serde(default)]
+    pub model_selection: AgentModelSelection,
+}
+
+/// Trusted handoff prepared for a separate reconciliation reasoner.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ReconciliationAgentJob {
+    pub version: u32,
+    pub job_id: String,
+    pub run_id: String,
+    pub blind_job_id: String,
+    pub instructions: String,
+    pub intended_spec: IntendedSpec,
+    pub echoed_spec: EchoedSpec,
+    pub available_evidence: Vec<ChangedFile>,
+    pub verdict_schema: serde_json::Value,
+}
+
+/// Typed response submitted by a reconciliation reasoner.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ReconciliationAgentSubmission {
+    pub job_id: String,
+    pub verdict: Verdict,
+    pub model: Option<String>,
+    #[serde(default)]
+    pub model_selection: AgentModelSelection,
 }

@@ -89,6 +89,11 @@ enum Command {
         #[command(subcommand)]
         command: ConfigCommand,
     },
+    /// Perform trusted handoffs for Codex-native agent verification.
+    Agent {
+        #[command(subcommand)]
+        command: AgentCommand,
+    },
     /// Serve Flect tools over the Model Context Protocol on stdio.
     Mcp,
     /// Run the reproducible semantic-verification evaluation suite.
@@ -133,6 +138,32 @@ enum ConfigCommand {
         key: String,
         /// New value.
         value: String,
+    },
+}
+
+#[derive(Debug, Subcommand)]
+enum AgentCommand {
+    /// Prepare sanitized read-only resources for a fresh blind verifier.
+    PrepareBlind {
+        #[arg(long)]
+        run: Option<String>,
+        #[arg(long)]
+        context: Option<ContextPolicy>,
+    },
+    /// Validate and accept a blind verifier submission JSON file.
+    SubmitEcho {
+        #[arg(long, value_name = "PATH")]
+        submission: PathBuf,
+    },
+    /// Prepare a separate judge job after an echo is accepted.
+    PrepareReconciliation {
+        #[arg(long)]
+        blind_job: String,
+    },
+    /// Validate, persist, and return a judge submission JSON file.
+    SubmitVerdict {
+        #[arg(long, value_name = "PATH")]
+        submission: PathBuf,
     },
 }
 

@@ -1,37 +1,40 @@
 ---
 name: flect
-description: Orchestrate Flect's independent intent-verification lifecycle in a Git repository. Use when Codex should capture an implementation task before coding, inspect Flect's privacy boundary, run blind patch verification, or respond to SAME, PARTIAL, DIFFERENT, or UNCERTAIN verdicts. Do not use as a substitute for tests, code review, or Flect's own verifier.
+description: Orchestrate Flect verification in a Git repository through API-backed reasoning or Codex-native fresh subagents. Use when Codex should capture a task before coding, prepare a structurally blind verifier job, spawn a separate reconciliation judge, run automated API verification, or respond to SAME, PARTIAL, DIFFERENT, or UNCERTAIN.
 ---
 
 # Flect
 
-Use the `flect` CLI as the source of verification behavior. Do not reproduce its prompts, reconciliation, or evidence logic in this skill.
+Use Flect as the trusted state, sanitization, schema, evidence, and persistence layer. Never make the parent implementation agent act as the blind verifier.
 
-## Workflow
+## Start and implement
 
-1. Run `flect doctor`. Resolve configuration, Git, or credential failures before continuing.
-2. Before implementation changes, capture the user's task faithfully:
+1. Run `flect doctor`.
+2. Before edits, call `flect_start` through MCP or run `flect start --task "<exact task>"`.
+3. Implement the task and run the repository's normal checks.
+4. Choose agent mode by default when the runtime can spawn a fresh child without inherited conversation. Use API mode when explicitly selected, agent spawning is unavailable, or the user requests configured API isolation.
 
-   ```console
-   flect start --task "<original task>"
-   ```
+## Agent mode
 
-   Use `--task-file` for long tasks. Do not paraphrase away constraints. Use `--spec-file` only when the user supplied or approved that structured specification.
-3. Implement the task and run the repository's normal checks. Flect supplements those checks; it does not replace them.
-4. Before a paid or external request, run `flect verify --dry-run`. Review the provider, model, context policy, included files, excluded files, and BlindGuard report. Stop if the disclosure is broader than the user expects.
-5. Run `flect verify` from the same worktree. Use `--echoed-spec` only for explicit offline fixtures or tests.
-6. Handle the verdict:
-   - `SAME`: report alignment and remaining test/review caveats. Do not call it proof of correctness.
-   - `PARTIAL`: inspect missing requirements, constraints, scope changes, and evidence; revise the patch and verify again.
-   - `DIFFERENT`: stop shipping work, compare the implementation with the captured task, and revisit the approach.
-   - `UNCERTAIN`: do not claim verification. Review excluded context and runner readiness, then request more context or an explicit API-backed run.
+1. Call `flect_prepare_blind` or `flect agent prepare-blind`.
+2. Spawn a fresh verifier with the runtime's no-parent-context option. In the current collaboration runtime, use `spawn_agent` with `fork_turns="none"`. Give it only the returned instructions and allowed read-only resources. Do not add the task, issue, plan, tests derived from intent, branch, commits, or parent reasoning.
+3. Request only `EchoedSpec`. If a supported model override is actually available, a cheaper capable model may be selected; otherwise inherit and report the runtime model. Never claim Luna was used unless the spawn API accepted Luna and the result records it.
+4. Submit the structured response with `flect_submit_echo` or `flect agent submit-echo`.
+5. Call `flect_prepare_reconciliation` or `flect agent prepare-reconciliation`.
+6. Spawn a different fresh judge with no inherited conversation. Give it only the returned judge contract. Request only `Verdict`.
+7. Submit with `flect_submit_verdict` or `flect agent submit-verdict`.
 
-Read [references/verdicts.md](references/verdicts.md) when handling a non-`SAME` result or explaining assurance boundaries.
+Read [references/agent-mode.md](references/agent-mode.md) before spawning agents and [references/isolation.md](references/isolation.md) when reporting assurance.
 
-## Isolation rules
+## API mode
 
-- Treat `flect inspect` and `flect verify --dry-run` as disclosure inspection, not verification.
-- Never add the original task, forward specification, conversation, branch name, issue text, or commit messages to a backward-verifier payload.
-- Distinguish orchestration from verification. The active Codex agent knows the task and is not a blind verifier. Strict verification occurs only when Flect's configured API runner sends its structural `BlindBundle` to the provider.
-- Do not claim that Codex selected a separate model, session, or hidden context unless a documented product capability proves it. Mock mode is an offline baseline and normally returns `UNCERTAIN`.
-- Preserve Flect's evidence caveats and model-routing labels. Confidence is advisory, not a calibrated probability.
+Run `flect verify --dry-run`, review disclosure, then run `flect verify`. Read [references/api-mode.md](references/api-mode.md) for selection and paid-request boundaries.
+
+## Verdict loop
+
+- `SAME`: report alignment plus normal test/review caveats.
+- `PARTIAL`: fix the findings, rerun project checks, and create new verifier and judge jobs. Never reuse child contexts.
+- `DIFFERENT`: reconsider task interpretation before more edits, then repeat with fresh jobs.
+- `UNCERTAIN`: do not claim verification passed. Deliberately adjust context, use a supported stronger child, use explicitly configured API verification, or request missing information.
+
+Respect the configured maximum iterations. Read [references/verdicts.md](references/verdicts.md) for detailed handling.

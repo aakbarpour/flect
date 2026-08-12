@@ -8,9 +8,9 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use flect_core::config::RunnerConfig;
 use flect_core::{
-    BlindBundle, BlindGuard, Config, ContextBuilder, ContextPolicy, EchoedSpec, Evidence,
-    FileStatus, GitRepository, IntendedSpec, ModelCallRecord, RunRecord, RunStore, RunnerKind,
-    TaskInput, Verdict, VerificationRecord, reconcile,
+    BlindBundle, BlindGuard, Config, ContextBuilder, ContextPolicy, EchoedSpec, FileStatus,
+    GitRepository, IntendedSpec, ModelCallRecord, RunRecord, RunStore, RunnerKind, TaskInput,
+    Verdict, VerificationRecord, reconcile,
 };
 use flect_runner::{
     AgentRequest, AgentRunner, MockRunner, OPENAI_PRICING_VERSION, OpenAiResponsesConfig,
@@ -22,7 +22,7 @@ use serde::de::DeserializeOwned;
 use serde_json::{Value, json};
 
 use crate::report;
-use crate::{Command, ConfigCommand, SkillCommand};
+use crate::{AgentCommand, Command, ConfigCommand, SkillCommand};
 
 struct RoutedOutput<T> {
     value: T,
@@ -82,6 +82,7 @@ pub async fn run(command: Command, json_output: bool) -> Result<()> {
         Command::Inspect { run, context } => inspect(run.as_deref(), context, json_output),
         Command::Doctor => doctor(json_output),
         Command::Config { command } => config(&command, json_output),
+        Command::Agent { command } => agent(&command, json_output),
         Command::Mcp => crate::mcp::run(),
         Command::Eval {
             suite,
@@ -231,7 +232,7 @@ async fn verify(
     let (echoed, backward_metadata) = reconstruct(&config, &bundle, echoed_spec_path).await?;
     let (mut verdict, reconciliation_metadata) =
         reconcile_semantically(&config, &run.intended_spec, &echoed, &bundle).await?;
-    validate_evidence(&mut verdict, &bundle);
+    flect_app::sanitize_verdict_evidence(&mut verdict, &bundle);
     let model_calls = model_calls("backward", backward_metadata, &config)
         .into_iter()
         .chain(model_calls(
@@ -246,6 +247,11 @@ async fn verify(
         bundle,
         echoed_spec: echoed,
         verdict,
+        isolation: if config.runner.kind == RunnerKind::Api {
+            flect_core::IsolationLevel::Strict
+        } else {
+            flect_core::IsolationLevel::Structural
+        },
         model_calls,
         verified_unix_ms: unix_millis()?,
     };
@@ -422,6 +428,33 @@ fn config(command: &ConfigCommand, json_output: bool) -> Result<()> {
         );
         Ok(())
     }
+}
+
+fn agent(command: &AgentCommand, _json_output: bool) -> Result<()> {
+    let current = std::env::current_dir().into_diagnostic()?;
+    let service = flect_app::AgentService::discover(&current).map_err(to_report)?;
+    let value = match command {
+        AgentCommand::PrepareBlind { run, context } => serde_json::to_value(
+            service
+                .prepare_blind(run.as_deref(), *context)
+                .map_err(to_report)?,
+        ),
+        AgentCommand::SubmitEcho { submission } => {
+            let submission = read_json_file(submission)?;
+            serde_json::to_value(service.submit_echo(submission).map_err(to_report)?)
+        }
+        AgentCommand::PrepareReconciliation { blind_job } => serde_json::to_value(
+            service
+                .prepare_reconciliation(blind_job)
+                .map_err(to_report)?,
+        ),
+        AgentCommand::SubmitVerdict { submission } => {
+            let submission = read_json_file(submission)?;
+            serde_json::to_value(service.submit_verdict(submission).map_err(to_report)?)
+        }
+    }
+    .into_diagnostic()?;
+    print_json(&value)
 }
 
 fn set_config_value(config: &mut Config, key: &str, value: &str) -> Result<()> {
@@ -888,89 +921,6 @@ fn verification_dry_run(config: &Config, bundle: &BlindBundle, json_output: bool
     }
 }
 
-fn validate_evidence(verdict: &mut Verdict, bundle: &BlindBundle) {
-    for evidence in &mut verdict.evidence {
-        validate_evidence_location(evidence, bundle);
-    }
-    let findings = verdict
-        .missing_requirements
-        .iter()
-        .chain(verdict.unrequested_changes.iter())
-        .chain(verdict.violated_constraints.iter())
-        .chain(verdict.potential_side_effects.iter());
-    for finding in findings {
-        if !verdict
-            .evidence
-            .iter()
-            .any(|evidence| evidence.description.contains(finding))
-        {
-            verdict.evidence.push(Evidence {
-                file: None,
-                line_start: None,
-                line_end: None,
-                patch_hunk: None,
-                description: finding.clone(),
-                confidence: verdict.confidence,
-            });
-        }
-    }
-}
-
-fn validate_evidence_location(evidence: &mut Evidence, bundle: &BlindBundle) {
-    let Some(file) = evidence.file.as_deref() else {
-        evidence.line_start = None;
-        evidence.line_end = None;
-        evidence.patch_hunk = None;
-        return;
-    };
-    let Some(changed) = bundle
-        .patch
-        .files
-        .iter()
-        .find(|changed| changed.path == file)
-    else {
-        evidence.file = None;
-        evidence.line_start = None;
-        evidence.line_end = None;
-        evidence.patch_hunk = None;
-        return;
-    };
-    if evidence
-        .patch_hunk
-        .as_deref()
-        .is_some_and(|hunk| !changed.patch.contains(hunk))
-    {
-        evidence.patch_hunk = None;
-    }
-    let valid_lines = evidence
-        .patch_hunk
-        .as_deref()
-        .and_then(new_line_range)
-        .is_some_and(|(first, last)| {
-            matches!(
-                (evidence.line_start, evidence.line_end),
-                (Some(start), Some(end)) if start <= end && start >= first && end <= last
-            )
-        });
-    if !valid_lines {
-        evidence.line_start = None;
-        evidence.line_end = None;
-    }
-}
-
-fn new_line_range(hunk: &str) -> Option<(u32, u32)> {
-    let header = hunk.lines().next()?;
-    let new_range = header
-        .split_whitespace()
-        .find(|part| part.starts_with('+'))?;
-    let (start, count) = new_range[1..]
-        .split_once(',')
-        .map_or((new_range.trim_start_matches('+'), "1"), |parts| parts);
-    let start = start.parse::<u32>().ok()?;
-    let count = count.parse::<u32>().ok()?;
-    (count > 0).then(|| (start, start.saturating_add(count - 1)))
-}
-
 fn deterministic_echo(bundle: &BlindBundle) -> EchoedSpec {
     let behavior_after = bundle
         .patch
@@ -1107,7 +1057,7 @@ fn to_report(error: impl std::fmt::Display) -> miette::Report {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use flect_core::{Alignment, RecommendedAction};
+    use flect_core::{Alignment, Evidence, RecommendedAction};
 
     #[test]
     fn deterministic_echo_never_claims_confidence() {
@@ -1243,7 +1193,7 @@ mod tests {
             confidence: 0.8,
             recommended_action: RecommendedAction::RevisePatch,
         };
-        validate_evidence(&mut verdict, &bundle);
+        flect_app::sanitize_verdict_evidence(&mut verdict, &bundle);
         assert!(verdict.evidence[0].file.is_none());
         assert!(verdict.evidence[0].line_start.is_none());
         assert!(
