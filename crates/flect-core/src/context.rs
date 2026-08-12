@@ -30,7 +30,10 @@ const DEFAULT_EXCLUSIONS: &[&str] = &[
     "**/credentials.*",
     "*secret*",
     "**/*secret*",
+    ".git",
     ".git/**",
+    ".flect",
+    ".flect/**",
     "target/**",
     "dist/**",
     "node_modules/**",
@@ -329,5 +332,20 @@ mod tests {
             .build(patch(&[("image.png", true)]))
             .unwrap();
         assert!(result.patch.files.is_empty());
+    }
+
+    #[test]
+    fn excludes_flect_and_git_state_even_without_gitignore() {
+        let temp = tempfile::tempdir().unwrap();
+        let result = ContextBuilder::new(temp.path(), &Config::default())
+            .unwrap()
+            .build(patch(&[
+                (".flect/runs/fl_secret.json", false),
+                (".git/config", false),
+                ("src/lib.rs", false),
+            ]))
+            .unwrap();
+        assert_eq!(result.patch.files.len(), 1);
+        assert_eq!(result.patch.files[0].path, "src/lib.rs");
     }
 }

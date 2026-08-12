@@ -23,6 +23,18 @@ const OWNED_FILES: &[OwnedFile] = &[
         relative_path: "references/verdicts.md",
         contents: include_str!("../../../skills/flect/references/verdicts.md"),
     },
+    OwnedFile {
+        relative_path: "references/agent-mode.md",
+        contents: include_str!("../../../skills/flect/references/agent-mode.md"),
+    },
+    OwnedFile {
+        relative_path: "references/api-mode.md",
+        contents: include_str!("../../../skills/flect/references/api-mode.md"),
+    },
+    OwnedFile {
+        relative_path: "references/isolation.md",
+        contents: include_str!("../../../skills/flect/references/isolation.md"),
+    },
 ];
 
 struct OwnedFile {

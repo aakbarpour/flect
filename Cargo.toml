@@ -1,5 +1,6 @@
 [workspace]
 members = [
+    "crates/flect-app",
     "crates/flect-cli",
     "crates/flect-core",
     "crates/flect-runner",
@@ -16,6 +17,7 @@ rust-version = "1.85"
 async-trait = "0.1.89"
 clap = { version = "4.5.45", features = ["derive"] }
 flect-core = { path = "crates/flect-core" }
+flect-app = { path = "crates/flect-app" }
 flect-runner = { path = "crates/flect-runner" }
 globset = "0.4.16"
 jsonschema = { version = "0.33.0", default-features = false }
