@@ -1,0 +1,46 @@
+name: Bug report
+description: Report reproducible incorrect or unsafe Flect behavior.
+title: "bug: "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: Thank you for helping improve Flect. Remove secrets and proprietary source before posting logs or bundles.
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: What happened, and what did you expect instead?
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Reproduction
+      description: Provide the smallest safe sequence of commands and inputs that reproduces the problem.
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Flect version
+      placeholder: flect 0.1.0
+    validations:
+      required: true
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment
+      description: Operating system, Git version, runner kind, and relevant configuration with credentials removed.
+  - type: textarea
+    id: impact
+    attributes:
+      label: Impact and safety considerations
+      description: Note data exposure, Git mutation, incorrect verdict, or compatibility impact.
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Safety check
+      options:
+        - label: I removed API keys, credentials, proprietary source, and other secrets from this report.
+          required: true

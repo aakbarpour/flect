@@ -1,0 +1,46 @@
+name: Feature request
+description: Propose a focused improvement to Flect.
+title: "feature: "
+labels: ["enhancement"]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: What developer problem or missing workflow should Flect address?
+    validations:
+      required: true
+  - type: textarea
+    id: goal
+    attributes:
+      label: Goal
+      description: Describe the desired outcome without prescribing unnecessary architecture.
+    validations:
+      required: true
+  - type: textarea
+    id: scope
+    attributes:
+      label: Scope and non-goals
+      description: What belongs in the first change, and what should remain out of scope?
+    validations:
+      required: true
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: Acceptance criteria
+      description: List observable behavior that would make the feature complete.
+      placeholder: "- [ ] ..."
+    validations:
+      required: true
+  - type: textarea
+    id: technical
+    attributes:
+      label: Technical and privacy considerations
+      description: Note architecture boundaries, compatibility, credentials, network access, or disclosure concerns.
+  - type: textarea
+    id: validation
+    attributes:
+      label: Validation requirements
+      description: What tests or manual checks should prove the feature works?
+    validations:
+      required: true
