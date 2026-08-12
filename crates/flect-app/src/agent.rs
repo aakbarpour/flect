@@ -474,6 +474,7 @@ impl AgentService {
                 workspace.display().to_string(),
             ));
         }
+        #[cfg(windows)]
         make_writable(&canonical)?;
         fs::remove_dir_all(&canonical).map_err(|source| workspace_error(&canonical, source))?;
         Ok(true)
@@ -627,11 +628,6 @@ fn make_writable(path: &Path) -> Result<(), AgentWorkflowError> {
                 .map_err(|source| workspace_error(&path, source))?;
         }
     }
-    Ok(())
-}
-
-#[cfg(not(windows))]
-fn make_writable(_path: &Path) -> Result<(), AgentWorkflowError> {
     Ok(())
 }
 
