@@ -5,12 +5,17 @@ use std::io::{self, BufRead, Write};
 use std::path::Path;
 use std::process::Command;
 
-use flect_core::{GitRepository, RunStore};
+use flect_app::AgentService;
+use flect_core::{
+    BlindAgentSubmission, ContextPolicy, EchoedSpec, GitRepository, ReconciliationAgentSubmission,
+    RunStore, Verdict,
+};
 use miette::{IntoDiagnostic, Result, WrapErr};
+use schemars::schema_for;
 use serde_json::{Map, Value, json};
 
 const PROTOCOL_VERSION: &str = "2025-11-25";
-const INSTRUCTIONS: &str = "Use flect_start before implementation to preserve the original task and base revision. After edits, use flect_inspect to review the strict blind bundle, then flect_verify. The backward verifier receives the patch bundle but never the original task. Use flect_get_result to retrieve the persisted structured verdict.";
+const INSTRUCTIONS: &str = "Use flect_start before implementation. For Codex-native verification, call flect_prepare_blind, hand only its allowed resources to a fresh no-parent-context verifier, submit its EchoedSpec with flect_submit_echo, prepare a separate judge with flect_prepare_reconciliation, and submit its Verdict with flect_submit_verdict. Alternatively, flect_verify retains the configured automated API workflow. Use flect_get_result to retrieve the persisted verdict.";
 
 pub fn run() -> Result<()> {
     let executable = std::env::current_exe()
@@ -134,6 +139,10 @@ fn call_tool(
         "flect_inspect" => run_inspect(arguments, executable, working_directory),
         "flect_echo" => run_echo(arguments, executable, working_directory),
         "flect_verify" => run_verify(arguments, executable, working_directory),
+        "flect_prepare_blind" => prepare_blind(arguments, working_directory),
+        "flect_submit_echo" => submit_echo(arguments, working_directory),
+        "flect_prepare_reconciliation" => prepare_reconciliation(arguments, working_directory),
+        "flect_submit_verdict" => submit_verdict(arguments, working_directory),
         "flect_get_result" => get_result(arguments, working_directory),
         _ => return Err(format!("unknown Flect tool `{name}`")),
     };
@@ -155,7 +164,7 @@ fn validate_arguments(
             }
             optional_string(arguments, "spec_file")?;
         }
-        "flect_inspect" => {
+        "flect_inspect" | "flect_prepare_blind" => {
             reject_unknown(arguments, &["run", "context"])?;
             optional_string(arguments, "run")?;
             context(arguments)?;
@@ -172,6 +181,30 @@ fn validate_arguments(
             optional_string(arguments, "echoed_spec")?;
             context(arguments)?;
             optional_bool(arguments, "dry_run")?;
+        }
+        "flect_submit_echo" => {
+            reject_unknown(
+                arguments,
+                &["job_id", "echoed_spec", "model", "model_selection"],
+            )?;
+            required_string(arguments, "job_id")?;
+            required_object(arguments, "echoed_spec")?;
+            optional_string(arguments, "model")?;
+            model_selection(arguments)?;
+        }
+        "flect_prepare_reconciliation" => {
+            reject_unknown(arguments, &["blind_job_id"])?;
+            required_string(arguments, "blind_job_id")?;
+        }
+        "flect_submit_verdict" => {
+            reject_unknown(
+                arguments,
+                &["job_id", "verdict", "model", "model_selection"],
+            )?;
+            required_string(arguments, "job_id")?;
+            required_object(arguments, "verdict")?;
+            optional_string(arguments, "model")?;
+            model_selection(arguments)?;
         }
         "flect_get_result" => {
             reject_unknown(arguments, &["run"])?;
@@ -271,6 +304,61 @@ fn get_result(
     serde_json::to_value(record).map_err(|error| error.to_string())
 }
 
+fn prepare_blind(
+    arguments: &Map<String, Value>,
+    working_directory: &Path,
+) -> std::result::Result<Value, String> {
+    let service = AgentService::discover(working_directory).map_err(|error| error.to_string())?;
+    let run = optional_string(arguments, "run")?;
+    let context = context(arguments)?
+        .map(|value| value.parse::<ContextPolicy>().map_err(str::to_owned))
+        .transpose()?;
+    let job = service
+        .prepare_blind(run.as_deref(), context)
+        .map_err(|error| error.to_string())?;
+    serde_json::to_value(job).map_err(|error| error.to_string())
+}
+
+fn submit_echo(
+    arguments: &Map<String, Value>,
+    working_directory: &Path,
+) -> std::result::Result<Value, String> {
+    let submission =
+        serde_json::from_value::<BlindAgentSubmission>(Value::Object(arguments.clone()))
+            .map_err(|error| format!("invalid blind submission: {error}"))?;
+    let service = AgentService::discover(working_directory).map_err(|error| error.to_string())?;
+    let echo = service
+        .submit_echo(submission)
+        .map_err(|error| error.to_string())?;
+    serde_json::to_value(echo).map_err(|error| error.to_string())
+}
+
+fn prepare_reconciliation(
+    arguments: &Map<String, Value>,
+    working_directory: &Path,
+) -> std::result::Result<Value, String> {
+    let blind_job_id = required_string(arguments, "blind_job_id")?;
+    let service = AgentService::discover(working_directory).map_err(|error| error.to_string())?;
+    let job = service
+        .prepare_reconciliation(&blind_job_id)
+        .map_err(|error| error.to_string())?;
+    serde_json::to_value(job).map_err(|error| error.to_string())
+}
+
+fn submit_verdict(
+    arguments: &Map<String, Value>,
+    working_directory: &Path,
+) -> std::result::Result<Value, String> {
+    let submission =
+        serde_json::from_value::<ReconciliationAgentSubmission>(Value::Object(arguments.clone()))
+            .map_err(|error| format!("invalid reconciliation submission: {error}"))?;
+    let service = AgentService::discover(working_directory).map_err(|error| error.to_string())?;
+    let record = service
+        .submit_verdict(submission)
+        .map_err(|error| error.to_string())?;
+    serde_json::to_value(record).map_err(|error| error.to_string())
+}
+
 fn run_cli(
     executable: &Path,
     working_directory: &Path,
@@ -333,13 +421,34 @@ fn optional_bool(
         .transpose()
 }
 
+fn required_object<'a>(
+    object: &'a Map<String, Value>,
+    key: &str,
+) -> std::result::Result<&'a Map<String, Value>, String> {
+    object
+        .get(key)
+        .and_then(Value::as_object)
+        .ok_or_else(|| format!("`{key}` must be an object"))
+}
+
+fn model_selection(object: &Map<String, Value>) -> std::result::Result<Option<String>, String> {
+    let value = optional_string(object, "model_selection")?;
+    if value
+        .as_deref()
+        .is_some_and(|value| !matches!(value, "explicit" | "inherited" | "unknown"))
+    {
+        return Err("`model_selection` must be explicit, inherited, or unknown".to_owned());
+    }
+    Ok(value)
+}
+
 fn context(object: &Map<String, Value>) -> std::result::Result<Option<String>, String> {
     let value = optional_string(object, "context")?;
     if value
         .as_deref()
-        .is_some_and(|value| !matches!(value, "patch" | "focused" | "repository"))
+        .is_some_and(|value| !matches!(value, "patch" | "focused" | "repo"))
     {
-        return Err("`context` must be patch, focused, or repository".to_owned());
+        return Err("`context` must be patch, focused, or repo".to_owned());
     }
     Ok(value)
 }
@@ -420,6 +529,34 @@ fn tools() -> Vec<Value> {
             false,
         ),
         tool(
+            "flect_prepare_blind",
+            "Prepare sanitized read-only resources and a typed job for a fresh blind verifier.",
+            run_schema(false, false),
+            false,
+        ),
+        tool(
+            "flect_submit_echo",
+            "Validate and accept one EchoedSpec from the prepared blind verifier job.",
+            agent_submission_schema("echoed_spec", json!(schema_for!(EchoedSpec))),
+            false,
+        ),
+        tool(
+            "flect_prepare_reconciliation",
+            "Prepare a typed reconciliation job for a distinct fresh judge.",
+            json!({
+                "type": "object",
+                "properties": {"blind_job_id": {"type": "string", "minLength": 1}},
+                "required": ["blind_job_id"], "additionalProperties": false
+            }),
+            false,
+        ),
+        tool(
+            "flect_submit_verdict",
+            "Validate a judge Verdict against available evidence and persist the final result.",
+            agent_submission_schema("verdict", json!(schema_for!(Verdict))),
+            false,
+        ),
+        tool(
             "flect_get_result",
             "Retrieve a persisted structured verification result for a run.",
             json!({
@@ -465,7 +602,32 @@ fn run_schema(include_echoed: bool, include_dry_run: bool) -> Value {
 }
 
 fn context_schema() -> Value {
-    json!({"type": "string", "enum": ["patch", "focused", "repository"]})
+    json!({"type": "string", "enum": ["patch", "focused", "repo"]})
+}
+
+fn agent_submission_schema(payload: &str, payload_schema: Value) -> Value {
+    let properties = Map::from_iter([
+        (
+            "job_id".to_owned(),
+            json!({"type": "string", "minLength": 1}),
+        ),
+        (payload.to_owned(), payload_schema),
+        ("model".to_owned(), json!({"type": "string"})),
+        (
+            "model_selection".to_owned(),
+            json!({"type": "string", "enum": ["explicit", "inherited", "unknown"]}),
+        ),
+    ]);
+    let required = vec![
+        Value::String("job_id".to_owned()),
+        Value::String(payload.to_owned()),
+    ];
+    json!({
+        "type": "object",
+        "properties": properties,
+        "required": required,
+        "additionalProperties": false
+    })
 }
 
 #[cfg(test)]
@@ -485,6 +647,10 @@ mod tests {
                 "flect_inspect",
                 "flect_echo",
                 "flect_verify",
+                "flect_prepare_blind",
+                "flect_submit_echo",
+                "flect_prepare_reconciliation",
+                "flect_submit_verdict",
                 "flect_get_result"
             ]
         );
@@ -502,5 +668,26 @@ mod tests {
         });
         let response = handle_request(&request, Path::new("flect"), Path::new(".")).unwrap();
         assert_eq!(response["error"]["code"], -32602);
+    }
+
+    #[test]
+    fn agent_submission_schemas_include_typed_payloads() {
+        let tools = tools();
+        let echo = tools
+            .iter()
+            .find(|tool| tool["name"] == "flect_submit_echo")
+            .unwrap();
+        assert_eq!(
+            echo["inputSchema"]["properties"]["echoed_spec"]["additionalProperties"],
+            false
+        );
+        let verdict = tools
+            .iter()
+            .find(|tool| tool["name"] == "flect_submit_verdict")
+            .unwrap();
+        assert_eq!(
+            verdict["inputSchema"]["properties"]["verdict"]["additionalProperties"],
+            false
+        );
     }
 }
