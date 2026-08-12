@@ -119,12 +119,27 @@ pub fn doctor(value: &Value) {
     );
     println!(
         "Runner         {}",
-        value["runner_provider"].as_str().unwrap_or("unknown")
+        value["runner"]["kind"].as_str().unwrap_or("unknown")
     );
+    if let Some(model) = value["runner"]["model"].as_str() {
+        println!("Model          {model}");
+    }
+    if let Some(fallback) = value["runner"]["fallback_model"].as_str() {
+        println!("Fallback       {fallback}");
+    }
+    if let Some(credential) = value["runner"]["credential"].as_object() {
+        let name = credential["environment"].as_str().unwrap_or("unknown");
+        let status = if credential["available"].as_bool().unwrap_or(false) {
+            "available"
+        } else {
+            "missing"
+        };
+        println!("API key        {status} ({name})");
+    }
     println!(
         "\n{}",
         if value["ready"].as_bool().unwrap_or(false) {
-            "Ready for deterministic verification."
+            "Ready."
         } else {
             "Not ready. Resolve the checks above and run `flect doctor` again."
         }

@@ -1,11 +1,12 @@
 //! Provider-neutral execution boundary for structured agent calls.
-//!
-//! Milestone 1 ships only [`MockRunner`]. Network providers are intentionally
-//! deferred until the deterministic pipeline is stable.
+
+mod openai;
 
 use std::collections::VecDeque;
 use std::sync::Mutex;
 
+use async_trait::async_trait;
+pub use openai::{OpenAiResponsesConfig, OpenAiResponsesRunner};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use thiserror::Error;
@@ -27,21 +28,73 @@ pub enum RequestPurpose {
     ReconcileIntent,
 }
 
+impl RequestPurpose {
+    fn schema_name(self) -> &'static str {
+        match self {
+            Self::ReconstructPatchIntent => "echoed_spec",
+            Self::AnalyzeForwardIntent => "intended_spec",
+            Self::ReconcileIntent => "verdict",
+        }
+    }
+
+    fn instruction(self) -> &'static str {
+        match self {
+            Self::ReconstructPatchIntent => {
+                "Reconstruct the apparent behavioral intent using only the supplied implementation evidence. Return factual structured output and preserve uncertainty."
+            }
+            Self::AnalyzeForwardIntent => {
+                "Convert the supplied task into a faithful implementation specification. Do not invent requirements that are not present."
+            }
+            Self::ReconcileIntent => {
+                "Compare the supplied intended and reconstructed specifications. Return a conservative evidence-backed alignment verdict."
+            }
+        }
+    }
+}
+
 /// JSON Schema supplied to providers that support structured output.
 pub type JsonSchema = Value;
 
-/// A deliberately non-generic boundary that remains object-safe for providers.
+/// Token accounting reported by a provider.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct TokenUsage {
+    pub input_tokens: Option<u64>,
+    pub cached_input_tokens: Option<u64>,
+    pub output_tokens: Option<u64>,
+}
+
+/// Observable metadata from one runner request.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RunnerMetadata {
+    pub provider: String,
+    pub model: String,
+    pub latency_ms: u64,
+    pub usage: TokenUsage,
+}
+
+/// Structured provider output plus request metadata.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RunnerOutput {
+    pub value: Value,
+    pub metadata: RunnerMetadata,
+}
+
+/// Object-safe provider boundary for structured model calls.
+#[async_trait]
 pub trait AgentRunner: Send + Sync {
-    /// Produces JSON matching `schema`, leaving typed deserialization to callers.
+    /// Produces and validates JSON matching `schema`.
     ///
     /// # Errors
     ///
-    /// Returns [`RunnerError`] when the provider cannot produce structured output.
-    fn generate_structured(
+    /// Returns [`RunnerError`] when the provider cannot produce valid structured output.
+    async fn generate_structured(
         &self,
         request: &AgentRequest,
         schema: &JsonSchema,
-    ) -> Result<Value, RunnerError>;
+    ) -> Result<RunnerOutput, RunnerError>;
 }
 
 /// Provider invocation failed.
@@ -51,13 +104,37 @@ pub enum RunnerError {
     MissingMockResponse,
     #[error("mock runner state is unavailable because a previous caller panicked")]
     PoisonedMock,
-    #[error("provider returned invalid structured output: {0}")]
-    InvalidStructuredOutput(String),
-    #[error("runner provider `{0}` is not available in this Flect milestone")]
-    ProviderUnavailable(String),
+    #[error("API credential environment variable `{variable}` is not set or is empty")]
+    MissingCredential { variable: String },
+    #[error("runner base URL `{url}` is invalid: {details}")]
+    InvalidBaseUrl { url: String, details: String },
+    #[error("could not initialize the HTTP client: {0}")]
+    ClientInitialization(String),
+    #[error("the provider rejected authentication; check `{variable}` and the configured base URL")]
+    Authentication { variable: String },
+    #[error("the provider rate limit was reached{retry}")]
+    RateLimited { retry: String },
+    #[error("the provider request timed out after {seconds} seconds")]
+    Timeout { seconds: u64 },
+    #[error("could not reach the provider at {url}: {details}")]
+    Network { url: String, details: String },
+    #[error("the provider rejected this request as unsupported: {message}")]
+    UnsupportedRequest { message: String },
+    #[error("provider request failed with HTTP {status}: {message}")]
+    Provider { status: u16, message: String },
+    #[error("the provider refused the structured request: {0}")]
+    Refusal(String),
+    #[error("the provider returned an incomplete response: {0}")]
+    Incomplete(String),
+    #[error("the provider response did not contain structured output text")]
+    MissingOutput,
+    #[error("provider returned invalid JSON: {0}")]
+    InvalidJson(String),
+    #[error("provider output did not satisfy the requested schema: {0}")]
+    SchemaValidation(String),
 }
 
-/// Deterministic, in-memory runner used by tests and local dry workflows.
+/// Deterministic, in-memory runner used by tests and offline workflows.
 #[derive(Debug)]
 pub struct MockRunner {
     responses: Mutex<VecDeque<Value>>,
@@ -75,46 +152,105 @@ impl MockRunner {
     ///
     /// # Errors
     ///
-    /// Returns [`RunnerError::InvalidStructuredOutput`] when serialization fails.
+    /// Returns [`RunnerError::InvalidJson`] when serialization fails.
     pub fn with_response<T: Serialize>(response: &T) -> Result<Self, RunnerError> {
         let value = serde_json::to_value(response)
-            .map_err(|error| RunnerError::InvalidStructuredOutput(error.to_string()))?;
+            .map_err(|error| RunnerError::InvalidJson(error.to_string()))?;
         Ok(Self::new([value]))
     }
 }
 
+#[async_trait]
 impl AgentRunner for MockRunner {
-    fn generate_structured(
+    async fn generate_structured(
         &self,
         _request: &AgentRequest,
-        _schema: &JsonSchema,
-    ) -> Result<Value, RunnerError> {
-        self.responses
+        schema: &JsonSchema,
+    ) -> Result<RunnerOutput, RunnerError> {
+        let value = self
+            .responses
             .lock()
             .map_err(|_| RunnerError::PoisonedMock)?
             .pop_front()
-            .ok_or(RunnerError::MissingMockResponse)
+            .ok_or(RunnerError::MissingMockResponse)?;
+        validate_output(schema, &value)?;
+        Ok(RunnerOutput {
+            value,
+            metadata: RunnerMetadata {
+                provider: "mock".to_owned(),
+                model: "mock".to_owned(),
+                latency_ms: 0,
+                usage: TokenUsage::default(),
+            },
+        })
+    }
+}
+
+fn validate_output(schema: &JsonSchema, value: &Value) -> Result<(), RunnerError> {
+    let validator = jsonschema::validator_for(schema)
+        .map_err(|error| RunnerError::SchemaValidation(error.to_string()))?;
+    let errors = validator
+        .iter_errors(value)
+        .take(5)
+        .map(|error| error.to_string())
+        .collect::<Vec<_>>();
+    if errors.is_empty() {
+        Ok(())
+    } else {
+        Err(RunnerError::SchemaValidation(errors.join("; ")))
     }
 }
 
 #[cfg(test)]
 mod tests {
+    use serde_json::json;
+
     use super::*;
 
-    #[test]
-    fn returns_responses_in_order() {
-        let runner = MockRunner::new([Value::from(1), Value::from(2)]);
-        let request = AgentRequest {
+    fn request() -> AgentRequest {
+        AgentRequest {
             purpose: RequestPurpose::ReconstructPatchIntent,
             input: Value::Null,
-        };
+        }
+    }
+
+    #[tokio::test]
+    async fn returns_responses_in_order() {
+        let runner = MockRunner::new([json!({"ok": 1}), json!({"ok": 2})]);
+        let schema = json!({
+            "type": "object",
+            "properties": {"ok": {"type": "integer"}},
+            "required": ["ok"]
+        });
         assert_eq!(
-            runner.generate_structured(&request, &Value::Null).unwrap(),
-            Value::from(1)
+            runner
+                .generate_structured(&request(), &schema)
+                .await
+                .unwrap()
+                .value,
+            json!({"ok": 1})
         );
         assert_eq!(
-            runner.generate_structured(&request, &Value::Null).unwrap(),
-            Value::from(2)
+            runner
+                .generate_structured(&request(), &schema)
+                .await
+                .unwrap()
+                .value,
+            json!({"ok": 2})
         );
+    }
+
+    #[tokio::test]
+    async fn mock_validates_schema() {
+        let runner = MockRunner::new([json!({"ok": "not an integer"})]);
+        let schema = json!({
+            "type": "object",
+            "properties": {"ok": {"type": "integer"}},
+            "required": ["ok"]
+        });
+        assert!(matches!(
+            runner.generate_structured(&request(), &schema).await,
+            Err(RunnerError::SchemaValidation(_))
+        ));
     }
 }

@@ -9,7 +9,7 @@ pub mod reconcile;
 pub mod state;
 
 pub use blind::{BlindGuard, BlindGuardError, BundleContext};
-pub use config::{Config, ConfigError};
+pub use config::{Config, ConfigError, RunnerKind, RunnerProtocol};
 pub use context::{ContextBuilder, ContextError};
 pub use domain::*;
 pub use git::{GitError, GitRepository};

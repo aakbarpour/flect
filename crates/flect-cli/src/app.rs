@@ -8,7 +8,8 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use flect_core::{
     BlindBundle, BlindGuard, Config, ContextBuilder, ContextPolicy, EchoedSpec, FileStatus,
-    GitRepository, IntendedSpec, RunRecord, RunStore, TaskInput, VerificationRecord, reconcile,
+    GitRepository, IntendedSpec, RunRecord, RunStore, RunnerKind, TaskInput, VerificationRecord,
+    reconcile,
 };
 use flect_runner::{AgentRequest, AgentRunner, MockRunner, RequestPurpose};
 use miette::{IntoDiagnostic, Result, WrapErr, miette};
@@ -18,7 +19,7 @@ use serde_json::json;
 use crate::Command;
 use crate::report;
 
-pub fn run(command: Command, json_output: bool) -> Result<()> {
+pub async fn run(command: Command, json_output: bool) -> Result<()> {
     match command {
         Command::Init => init(json_output),
         Command::Start {
@@ -35,17 +36,20 @@ pub fn run(command: Command, json_output: bool) -> Result<()> {
             run,
             echoed_spec,
             context,
-        } => verify(run.as_deref(), echoed_spec.as_deref(), context, json_output),
+        } => verify(run.as_deref(), echoed_spec.as_deref(), context, json_output).await,
         Command::Echo {
             revision,
             echoed_spec,
             context,
-        } => echo(
-            revision.as_deref(),
-            echoed_spec.as_deref(),
-            context,
-            json_output,
-        ),
+        } => {
+            echo(
+                revision.as_deref(),
+                echoed_spec.as_deref(),
+                context,
+                json_output,
+            )
+            .await
+        }
         Command::Inspect { run, context } => inspect(run.as_deref(), context, json_output),
         Command::Doctor => doctor(json_output),
     }
@@ -137,7 +141,7 @@ fn start(
     Ok(())
 }
 
-fn verify(
+async fn verify(
     run_id: Option<&str>,
     echoed_spec_path: Option<&Path>,
     context: Option<ContextPolicy>,
@@ -160,7 +164,7 @@ fn verify(
         ));
     }
     let bundle = build_bundle(&repository, &config, &run.base_revision)?;
-    let echoed = reconstruct(&bundle, echoed_spec_path)?;
+    let echoed = reconstruct(&bundle, echoed_spec_path).await?;
     let verdict = reconcile(&run.intended_spec, &echoed);
     let record = VerificationRecord {
         version: 1,
@@ -180,7 +184,7 @@ fn verify(
     Ok(())
 }
 
-fn echo(
+async fn echo(
     revision: Option<&str>,
     echoed_spec_path: Option<&Path>,
     context: Option<ContextPolicy>,
@@ -197,7 +201,7 @@ fn echo(
         None => repository.head_revision().map_err(to_report)?,
     };
     let bundle = build_bundle(&repository, &config, &base)?;
-    let echoed = reconstruct(&bundle, echoed_spec_path)?;
+    let echoed = reconstruct(&bundle, echoed_spec_path).await?;
     if json_output {
         print_json(&json!({ "bundle_manifest": bundle.manifest, "echoed_spec": echoed }))?;
     } else {
@@ -234,31 +238,52 @@ fn doctor(json_output: bool) -> Result<()> {
     };
     let current = std::env::current_dir().into_diagnostic()?;
     let repository = GitRepository::discover(&current);
-    let (root, config_status, provider) = match repository {
+    let (root, config_status, runner) = match repository {
         Ok(repository) => match load_config(repository.root()) {
-            Ok(config) => (
-                repository.root().display().to_string(),
-                "valid".to_owned(),
-                config.runner.provider,
-            ),
+            Ok(config) => {
+                let credential = if config.runner.kind == RunnerKind::Api {
+                    Some(json!({
+                        "environment": config.runner.api_key_env,
+                        "available": std::env::var_os(&config.runner.api_key_env)
+                            .is_some_and(|value| !value.is_empty()),
+                    }))
+                } else {
+                    None
+                };
+                (
+                    repository.root().display().to_string(),
+                    "valid".to_owned(),
+                    json!({
+                        "kind": config.runner.kind.to_string(),
+                        "protocol": format!("{:?}", config.runner.protocol).to_ascii_lowercase(),
+                        "base_url": config.runner.base_url,
+                        "model": config.runner.model,
+                        "fallback_model": config.runner.fallback_model,
+                        "credential": credential,
+                    }),
+                )
+            }
             Err(error) => (
                 repository.root().display().to_string(),
                 format!("invalid: {error}"),
-                "unknown".to_owned(),
+                json!({"kind": "unknown"}),
             ),
         },
         Err(error) => (
             format!("unavailable: {error}"),
             "not checked".to_owned(),
-            "not checked".to_owned(),
+            json!({"kind": "not checked"}),
         ),
     };
-    let ready = git_version != "unavailable" && config_status == "valid" && provider == "mock";
+    let credential_ready = runner["credential"]
+        .as_object()
+        .is_none_or(|credential| credential["available"].as_bool().unwrap_or(false));
+    let ready = git_version != "unavailable" && config_status == "valid" && credential_ready;
     let result = json!({
         "git": git_version,
         "repository": root,
         "configuration": config_status,
-        "runner_provider": provider,
+        "runner": runner,
         "ready": ready,
     });
     if json_output {
@@ -285,7 +310,7 @@ fn build_bundle(repository: &GitRepository, config: &Config, base: &str) -> Resu
     BlindGuard::build(context, &config.blind).map_err(to_report)
 }
 
-fn reconstruct(bundle: &BlindBundle, echoed_spec_path: Option<&Path>) -> Result<EchoedSpec> {
+async fn reconstruct(bundle: &BlindBundle, echoed_spec_path: Option<&Path>) -> Result<EchoedSpec> {
     let response = match echoed_spec_path {
         Some(path) => read_json_file(path)?,
         None => deterministic_echo(bundle),
@@ -298,8 +323,9 @@ fn reconstruct(bundle: &BlindBundle, echoed_spec_path: Option<&Path>) -> Result<
     let schema = serde_json::to_value(schema_for!(EchoedSpec)).into_diagnostic()?;
     let value = runner
         .generate_structured(&request, &schema)
+        .await
         .map_err(to_report)?;
-    serde_json::from_value(value)
+    serde_json::from_value(value.value)
         .into_diagnostic()
         .wrap_err("runner response did not match the EchoedSpec schema")
 }
@@ -356,12 +382,12 @@ fn load_config(root: &Path) -> Result<Config> {
 }
 
 fn ensure_mock_provider(config: &Config) -> Result<()> {
-    if config.runner.provider == "mock" {
+    if config.runner.kind == RunnerKind::Mock {
         Ok(())
     } else {
         Err(miette!(
-            "runner provider `{}` is configured, but Milestone 1 supports only `mock`; real providers are introduced in Milestone 2",
-            config.runner.provider
+            "runner kind `{}` is configured, but semantic API orchestration is implemented in issue #3; use `mock` for the deterministic pipeline until then",
+            config.runner.kind
         ))
     }
 }

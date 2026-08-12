@@ -8,6 +8,32 @@ use thiserror::Error;
 
 use crate::domain::ContextPolicy;
 
+/// Configured runner implementation.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RunnerKind {
+    #[default]
+    Mock,
+    Api,
+}
+
+impl std::fmt::Display for RunnerKind {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Mock => formatter.write_str("mock"),
+            Self::Api => formatter.write_str("api"),
+        }
+    }
+}
+
+/// Wire protocol used by an API runner.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RunnerProtocol {
+    #[default]
+    Responses,
+}
+
 /// Top-level contents of `flect.toml`.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
@@ -58,14 +84,19 @@ impl Default for VerificationConfig {
     }
 }
 
-/// Provider configuration. Only `mock` is executable in Milestone 1.
+/// Provider-neutral runner configuration. Credentials are referenced by environment name only.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct RunnerConfig {
-    pub provider: String,
+    #[serde(alias = "provider")]
+    pub kind: RunnerKind,
+    pub protocol: RunnerProtocol,
+    pub base_url: String,
+    pub api_key_env: String,
     pub model: Option<String>,
     pub fallback_model: Option<String>,
     pub reasoning_effort: String,
+    pub timeout_seconds: u64,
     pub escalate_on_uncertain: bool,
     pub confidence_threshold: f64,
 }
@@ -73,10 +104,14 @@ pub struct RunnerConfig {
 impl Default for RunnerConfig {
     fn default() -> Self {
         Self {
-            provider: "mock".to_owned(),
+            kind: RunnerKind::Mock,
+            protocol: RunnerProtocol::Responses,
+            base_url: "https://api.openai.com/v1".to_owned(),
+            api_key_env: "OPENAI_API_KEY".to_owned(),
             model: None,
             fallback_model: None,
             reasoning_effort: "medium".to_owned(),
+            timeout_seconds: 120,
             escalate_on_uncertain: true,
             confidence_threshold: 0.65,
         }
@@ -181,8 +216,12 @@ max_context_file_bytes = 128000
 max_context_bytes = 512000
 
 [runner]
-provider = "mock"
+kind = "mock"
+protocol = "responses"
+base_url = "https://api.openai.com/v1"
+api_key_env = "OPENAI_API_KEY"
 reasoning_effort = "medium"
+timeout_seconds = 120
 escalate_on_uncertain = true
 confidence_threshold = 0.65
 
@@ -213,6 +252,30 @@ patterns = []
             return Err(ConfigError::Invalid {
                 field: "runner.confidence_threshold",
                 message: "must be between 0 and 1".to_owned(),
+            });
+        }
+        if self.runner.timeout_seconds == 0 {
+            return Err(ConfigError::Invalid {
+                field: "runner.timeout_seconds",
+                message: "must be at least 1".to_owned(),
+            });
+        }
+        if self.runner.api_key_env.trim().is_empty() {
+            return Err(ConfigError::Invalid {
+                field: "runner.api_key_env",
+                message: "cannot be empty".to_owned(),
+            });
+        }
+        if self.runner.kind == RunnerKind::Api
+            && self
+                .runner
+                .model
+                .as_deref()
+                .is_none_or(|model| model.trim().is_empty())
+        {
+            return Err(ConfigError::Invalid {
+                field: "runner.model",
+                message: "is required when runner.kind is `api`".to_owned(),
             });
         }
         if self.verification.max_context_file_bytes > self.verification.max_context_bytes {
@@ -250,5 +313,24 @@ mod tests {
             config.validate(),
             Err(ConfigError::Invalid { .. })
         ));
+    }
+
+    #[test]
+    fn api_runner_requires_model() {
+        let mut config = Config::default();
+        config.runner.kind = RunnerKind::Api;
+        assert!(matches!(
+            config.validate(),
+            Err(ConfigError::Invalid {
+                field: "runner.model",
+                ..
+            })
+        ));
+    }
+
+    #[test]
+    fn accepts_legacy_provider_field() {
+        let parsed: Config = toml::from_str("version = 1\n[runner]\nprovider = 'mock'").unwrap();
+        assert_eq!(parsed.runner.kind, RunnerKind::Mock);
     }
 }
