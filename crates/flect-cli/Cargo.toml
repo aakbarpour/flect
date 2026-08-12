@@ -1,0 +1,28 @@
+[package]
+name = "flect-cli"
+description = "Independent intent verification for AI-written patches"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[[bin]]
+name = "flect"
+path = "src/main.rs"
+
+[dependencies]
+clap.workspace = true
+flect-core.workspace = true
+flect-runner.workspace = true
+miette.workspace = true
+schemars.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
+
+[lints]
+workspace = true

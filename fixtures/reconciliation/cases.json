@@ -1,0 +1,118 @@
+[
+  {
+    "name": "correct implementation",
+    "intended": {
+      "objective": "Reject expired refresh tokens and rotate valid tokens",
+      "requirements": ["Reject expired refresh tokens", "Rotate tokens after refresh"],
+      "constraints": [],
+      "non_goals": [],
+      "acceptance_criteria": [],
+      "expected_scope": ["auth"],
+      "uncertainties": []
+    },
+    "echoed": {
+      "apparent_objective": "Reject expired refresh tokens and rotate valid tokens",
+      "behavior_before": [],
+      "behavior_after": ["Expired refresh tokens are rejected", "Tokens rotate after refresh"],
+      "affected_scope": ["auth"],
+      "side_effects": [],
+      "assumptions": [],
+      "uncertainties": [],
+      "confidence": 0.9
+    },
+    "expected": "SAME"
+  },
+  {
+    "name": "partial implementation",
+    "intended": {
+      "objective": "Reject expired refresh tokens and rotate valid tokens",
+      "requirements": ["Reject expired refresh tokens", "Rotate tokens after refresh"],
+      "constraints": [],
+      "non_goals": [],
+      "acceptance_criteria": [],
+      "expected_scope": ["auth"],
+      "uncertainties": []
+    },
+    "echoed": {
+      "apparent_objective": "Reject expired refresh tokens",
+      "behavior_before": [],
+      "behavior_after": ["Expired refresh tokens are rejected"],
+      "affected_scope": ["auth"],
+      "side_effects": [],
+      "assumptions": [],
+      "uncertainties": [],
+      "confidence": 0.9
+    },
+    "expected": "PARTIAL"
+  },
+  {
+    "name": "scope creep",
+    "intended": {
+      "objective": "Reject expired refresh tokens",
+      "requirements": ["Reject expired refresh tokens"],
+      "constraints": [],
+      "non_goals": [],
+      "acceptance_criteria": [],
+      "expected_scope": ["auth"],
+      "uncertainties": []
+    },
+    "echoed": {
+      "apparent_objective": "Reject expired refresh tokens",
+      "behavior_before": [],
+      "behavior_after": ["Expired refresh tokens are rejected"],
+      "affected_scope": ["auth", "sessions"],
+      "side_effects": ["Also broadens accepted session states"],
+      "assumptions": [],
+      "uncertainties": [],
+      "confidence": 0.85
+    },
+    "expected": "PARTIAL"
+  },
+  {
+    "name": "wrong component",
+    "intended": {
+      "objective": "Reject expired refresh tokens",
+      "requirements": [],
+      "constraints": [],
+      "non_goals": [],
+      "acceptance_criteria": [],
+      "expected_scope": ["auth"],
+      "uncertainties": []
+    },
+    "echoed": {
+      "apparent_objective": "Reformat database migration files",
+      "behavior_before": [],
+      "behavior_after": ["SQL indentation is normalized"],
+      "affected_scope": ["migrations"],
+      "side_effects": [],
+      "assumptions": [],
+      "uncertainties": [],
+      "confidence": 0.9
+    },
+    "expected": "DIFFERENT"
+  },
+  {
+    "name": "insufficient evidence",
+    "intended": {
+      "objective": "Reject expired refresh tokens",
+      "requirements": [],
+      "constraints": [],
+      "non_goals": [],
+      "acceptance_criteria": [],
+      "expected_scope": ["auth"],
+      "uncertainties": []
+    },
+    "echoed": {
+      "apparent_objective": "Possibly changes token handling",
+      "behavior_before": [],
+      "behavior_after": [],
+      "affected_scope": ["auth"],
+      "side_effects": [],
+      "assumptions": [],
+      "uncertainties": ["The relevant implementation is not in the patch context"],
+      "confidence": 0.2
+    },
+    "expected": "UNCERTAIN"
+  }
+]
+

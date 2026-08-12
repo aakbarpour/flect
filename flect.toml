@@ -1,0 +1,27 @@
+version = 1
+
+[verification]
+context = "focused"
+max_iterations = 2
+include_untracked = true
+max_patch_bytes = 1000000
+max_context_file_bytes = 128000
+max_context_bytes = 512000
+
+[runner]
+provider = "mock"
+reasoning_effort = "medium"
+escalate_on_uncertain = true
+confidence_threshold = 0.65
+
+[blind]
+strip_git_metadata = true
+strip_branch_name = true
+strip_commit_messages = true
+
+[privacy]
+respect_gitignore = true
+
+[ignore]
+patterns = []
+
