@@ -207,7 +207,7 @@ Read [the architecture](docs/architecture.md), [blind verification boundary](doc
 
 ## Research attribution
 
-Flect is inspired by the reconstruct-and-verify method described in **Independent Patch Verification for Coding Agents with a Bidirectional Reconstruct-and-Verify Framework** (RETRACE), arXiv:2608.08950. Flect does not claim to have invented that academic method. See [Research and attribution](docs/research.md) for full authorship and a separation of research concepts from Flect-specific engineering.
+Flect is inspired by the reconstruct-and-verify method described in **Independent Patch Verification for Coding Agents with a Bidirectional Reconstruct-and-Verify Framework** (RETRACE), [arXiv:2608.08950](https://arxiv.org/abs/2608.08950). Flect does not claim to have invented that academic method. See [Research and attribution](docs/research.md) for the reported RETRACE results, full authorship, and a separation of research concepts from Flect-specific engineering.
 
 ## License
 

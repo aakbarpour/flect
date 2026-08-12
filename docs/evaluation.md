@@ -15,7 +15,7 @@ flect --json eval --output target/flect-eval-offline.json
 
 Offline results prove that the harness, schemas, metric aggregation, and fixture expectations are reproducible. A perfect offline score is expected because the mock responses are fixture data; it is not evidence of real-model quality.
 
-## Opt-in model comparison
+## Optional model comparison
 
 Copy and review `fixtures/evaluation/profiles.example.toml`, set its credential environment variable outside the file, and opt in explicitly:
 
@@ -43,8 +43,20 @@ Reports include exact broad-verdict agreement, correct-patch acceptance, bad-pat
 
 For bad-patch detection, `PARTIAL` and `DIFFERENT` count as detected. `UNCERTAIN` is reported separately and does not count as successful detection. Important findings use case-authored, case-insensitive substring probes across structured negative findings and evidence descriptions; they are a coarse diagnostic, not a semantic score.
 
+## RETRACE research context
+
+Flect's design is inspired by RETRACE, but its bundled ten-case offline suite is not SWE-bench and has no published Flect real-model results. The following values are reported by the RETRACE paper, not measured by Flect:
+
+| Study configuration | Baseline | RETRACE |
+| --- | ---: | ---: |
+| mini-SWE-agent + GPT-5-mini, SWE-bench Verified (n=500) | 281/500 (56.2%) | 316/500 (63.2%) |
+| MiniMax M2.5, SWE-bench Verified (n=500) | 379/500 (75.8%) | 397/500 (79.4%) |
+| GPT-5-mini ablation (n=120) | baseline 60/120 (50.0%) | full RETRACE 73/120 (60.8%) |
+
+The paper's ablation also reports 68/120 (56.7%) for each forward-only and backward-only configuration. These figures motivate Flect's forward intent, blind reconstruction, and reconciliation architecture, but they do not establish Flect effectiveness, cost, false-positive rate, or model quality. See [the RETRACE paper](https://arxiv.org/abs/2608.08950).
+
 ## Methodology limits
 
 Ten hand-authored cases are sufficient to expose regressions and compare configurations directionally, but not to support population-level effectiveness claims or per-class precision/recall. There is only one case in most classes. Model confidence is an uncalibrated routing signal. Provider behavior, model snapshots, and pricing can change, so reports should be retained with dates and exact configuration.
 
-RETRACE results are research context and are never presented as Flect measurements. A no-Flect baseline must be defined before any future comparative claim.
+RETRACE results above are research context and are never presented as Flect measurements. A no-Flect baseline must be defined before any future comparative claim.
