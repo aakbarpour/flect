@@ -13,8 +13,8 @@ use flect_core::{
     TaskInput, Verdict, VerificationRecord, reconcile,
 };
 use flect_runner::{
-    AgentRequest, AgentRunner, MockRunner, OpenAiResponsesConfig, OpenAiResponsesRunner,
-    RequestPurpose, RunnerError, RunnerMetadata,
+    AgentRequest, AgentRunner, MockRunner, OPENAI_PRICING_VERSION, OpenAiResponsesConfig,
+    OpenAiResponsesRunner, RequestPurpose, RunnerError, RunnerMetadata, estimate_openai_cost,
 };
 use miette::{IntoDiagnostic, Result, WrapErr, miette};
 use schemars::{JsonSchema, schema_for};
@@ -23,29 +23,6 @@ use serde_json::{Value, json};
 
 use crate::report;
 use crate::{Command, SkillCommand};
-
-const PRICING_VERSION: &str = "openai-2026-08-12";
-const PRICING_TABLE: &[ModelPrice] = &[
-    ModelPrice {
-        model: "gpt-5.6-luna",
-        input_per_million: 1.0,
-        cached_input_per_million: 0.1,
-        output_per_million: 6.0,
-    },
-    ModelPrice {
-        model: "gpt-5.6-terra",
-        input_per_million: 2.5,
-        cached_input_per_million: 0.25,
-        output_per_million: 15.0,
-    },
-];
-
-struct ModelPrice {
-    model: &'static str,
-    input_per_million: f64,
-    cached_input_per_million: f64,
-    output_per_million: f64,
-}
 
 struct RoutedOutput<T> {
     value: T,
@@ -105,6 +82,21 @@ pub async fn run(command: Command, json_output: bool) -> Result<()> {
         Command::Inspect { run, context } => inspect(run.as_deref(), context, json_output),
         Command::Doctor => doctor(json_output),
         Command::Mcp => crate::mcp::run(),
+        Command::Eval {
+            suite,
+            profiles,
+            allow_paid_api,
+            output,
+        } => {
+            crate::eval::run(
+                &suite,
+                profiles.as_deref(),
+                allow_paid_api,
+                output.as_deref(),
+                json_output,
+            )
+            .await
+        }
         Command::Skill { command } => skill(&command, json_output),
     }
 }
@@ -751,7 +743,7 @@ fn model_calls(stage: &str, attempts: Vec<AttemptRecord>, config: &Config) -> Ve
         .into_iter()
         .enumerate()
         .map(|(index, attempt)| {
-            let cost = estimate_cost(&attempt.metadata, &config.runner.base_url);
+            let cost = estimate_openai_cost(&attempt.metadata, &config.runner.base_url);
             ModelCallRecord {
                 stage: stage.to_owned(),
                 attempt: u32::try_from(index + 1).unwrap_or(u32::MAX),
@@ -763,37 +755,11 @@ fn model_calls(stage: &str, attempts: Vec<AttemptRecord>, config: &Config) -> Ve
                 cached_input_tokens: attempt.metadata.usage.cached_input_tokens,
                 output_tokens: attempt.metadata.usage.output_tokens,
                 estimated_cost_usd: cost,
-                pricing_version: cost.map(|_| PRICING_VERSION.to_owned()),
+                pricing_version: cost.map(|_| OPENAI_PRICING_VERSION.to_owned()),
                 escalation_reason: attempt.escalation_reason,
             }
         })
         .collect()
-}
-
-fn estimate_cost(metadata: &RunnerMetadata, base_url: &str) -> Option<f64> {
-    if !base_url
-        .trim_end_matches('/')
-        .eq_ignore_ascii_case("https://api.openai.com/v1")
-    {
-        return None;
-    }
-    let price = PRICING_TABLE
-        .iter()
-        .find(|price| price.model == metadata.model)?;
-    let input = metadata.usage.input_tokens?;
-    let cached = metadata.usage.cached_input_tokens.unwrap_or(0).min(input);
-    let output = metadata.usage.output_tokens?;
-    let uncached = input.saturating_sub(cached);
-    let long_context = input > 272_000;
-    let uncached = f64::from(u32::try_from(uncached).ok()?);
-    let cached = f64::from(u32::try_from(cached).ok()?);
-    let output = f64::from(u32::try_from(output).ok()?);
-    Some(
-        ((uncached * price.input_per_million * if long_context { 2.0 } else { 1.0 })
-            + (cached * price.cached_input_per_million * if long_context { 2.0 } else { 1.0 })
-            + (output * price.output_per_million * if long_context { 1.5 } else { 1.0 }))
-            / 1_000_000.0,
-    )
 }
 
 fn verification_dry_run(config: &Config, bundle: &BlindBundle, json_output: bool) -> Result<()> {
@@ -1328,14 +1294,20 @@ mod tests {
             },
         };
         assert_eq!(
-            estimate_cost(&metadata, "https://api.openai.com/v1"),
+            estimate_openai_cost(&metadata, "https://api.openai.com/v1"),
             Some(0.115)
         );
-        assert_eq!(estimate_cost(&metadata, "https://example.com/v1"), None);
+        assert_eq!(
+            estimate_openai_cost(&metadata, "https://example.com/v1"),
+            None
+        );
         let unknown = RunnerMetadata {
             model: "custom-model".to_owned(),
             ..metadata
         };
-        assert_eq!(estimate_cost(&unknown, "https://api.openai.com/v1"), None);
+        assert_eq!(
+            estimate_openai_cost(&unknown, "https://api.openai.com/v1"),
+            None
+        );
     }
 }

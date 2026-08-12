@@ -1,10 +1,50 @@
 # Evaluation
 
-Evaluation is a product requirement, not a demonstration exercise. Flect will measure correct-patch acceptance, bad-patch detection, false positives, per-class precision/recall, uncertainty, latency, token use, and estimated provider cost.
+Flect's evaluation harness is a reproducible measurement tool, not a source of precomputed marketing claims. The bundled suite contains ten curated repository-level cases: a correct patch, partial implementation, scope creep, constraint violation, semantic workaround, broadened behavior, unrelated behavior removal, missing edge case, unnecessary refactor, and wrong-component change.
 
-Milestone 1 contains deterministic reconciliation fixtures that exercise `SAME`, `PARTIAL`, `DIFFERENT`, and `UNCERTAIN`. These validate pipeline behavior; they are not evidence of model quality and no Flect effectiveness numbers are claimed yet.
+Every case in `fixtures/evaluation/cases.json` contains base files, the original task, a structured candidate patch, an intended specification, deterministic mock outputs, the expected broad verdict, and important expected findings. The harness constructs a strict `BlindBundle` without the original task before backward reconstruction.
 
-Milestone 5 will add repository fixtures for correct changes, partial work, scope creep, constraint violations, semantic workarounds, broadened behavior, unrelated removals, missing edge cases, unnecessary refactors, and wrong-component fixes. Each fixture will retain the original task, base code, candidate patch, expected verdict, and important expected findings.
+## Offline evaluation
 
-Provider comparisons will include a cheap verifier, cheap verification with escalation, and a stronger verifier. A no-Flect baseline must be defined precisely before comparison. Results will identify dataset construction, sample size, model versions, configuration, confidence intervals or uncertainty, failures, and estimated costs. RETRACE results will not be presented as Flect results.
+The default command is deterministic, requires no credential, performs no network request, and spends no API credits:
 
+```console
+flect eval
+flect --json eval --output target/flect-eval-offline.json
+```
+
+Offline results prove that the harness, schemas, metric aggregation, and fixture expectations are reproducible. A perfect offline score is expected because the mock responses are fixture data; it is not evidence of real-model quality.
+
+## Opt-in model comparison
+
+Copy and review `fixtures/evaluation/profiles.example.toml`, set its credential environment variable outside the file, and opt in explicitly:
+
+```console
+export OPENAI_API_KEY=...
+flect eval \
+  --profiles fixtures/evaluation/profiles.example.toml \
+  --allow-paid-api \
+  --output target/flect-eval-api.json
+```
+
+PowerShell uses `$env:OPENAI_API_KEY = "..."` and backticks for line continuation. Merely supplying a profiles file is insufficient: the command fails unless `--allow-paid-api` is also present. Normal `cargo test --workspace` execution removes the credential and runs only the offline suite.
+
+The example profiles compare:
+
+- `cheap`: `gpt-5.6-luna`, with escalation disabled.
+- `cheap-plus-escalation`: Luna with a single Terra fallback for malformed, uncertain, or below-threshold backward/reconciliation output.
+- `stronger`: `gpt-5.6-terra`, with escalation disabled.
+
+Model IDs, endpoint, credential environment variable, reasoning effort, timeouts, and thresholds are configuration rather than permanent assumptions. Each report records the complete non-secret profile and the actual model sequence used per case.
+
+## Metrics
+
+Reports include exact broad-verdict agreement, correct-patch acceptance, bad-patch detection, false positives, uncertainty rate, important-finding recall, requests, latency, input/cached/output tokens, and estimated cost when all required usage and known pricing are available. Unknown token counts or pricing remain `null`; Flect does not invent them.
+
+For bad-patch detection, `PARTIAL` and `DIFFERENT` count as detected. `UNCERTAIN` is reported separately and does not count as successful detection. Important findings use case-authored, case-insensitive substring probes across structured negative findings and evidence descriptions; they are a coarse diagnostic, not a semantic score.
+
+## Methodology limits
+
+Ten hand-authored cases are sufficient to expose regressions and compare configurations directionally, but not to support population-level effectiveness claims or per-class precision/recall. There is only one case in most classes. Model confidence is an uncalibrated routing signal. Provider behavior, model snapshots, and pricing can change, so reports should be retained with dates and exact configuration.
+
+RETRACE results are research context and are never presented as Flect measurements. A no-Flect baseline must be defined before any future comparative claim.

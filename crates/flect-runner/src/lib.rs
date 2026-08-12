@@ -1,12 +1,14 @@
 //! Provider-neutral execution boundary for structured agent calls.
 
 mod openai;
+mod pricing;
 
 use std::collections::VecDeque;
 use std::sync::Mutex;
 
 use async_trait::async_trait;
 pub use openai::{OpenAiResponsesConfig, OpenAiResponsesRunner};
+pub use pricing::{OPENAI_PRICING_VERSION, estimate_openai_cost};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use thiserror::Error;
