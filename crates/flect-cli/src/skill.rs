@@ -38,6 +38,12 @@ enum InstallStatus {
     Modified,
 }
 
+pub fn status_label(repository_root: &Path) -> Result<String> {
+    let install_root = repository_root.join(INSTALL_ROOT);
+    reject_symlink_components(repository_root, &install_root)?;
+    Ok(status(&install_root)?.to_string())
+}
+
 impl std::fmt::Display for InstallStatus {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {

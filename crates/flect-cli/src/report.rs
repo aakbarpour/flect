@@ -189,6 +189,19 @@ pub fn doctor(value: &Value) {
         println!("API key        {status} ({name})");
     }
     println!(
+        "Codex CLI      {}",
+        if value["codex"]["available"].as_bool().unwrap_or(false) {
+            "available"
+        } else {
+            "unavailable"
+        }
+    );
+    println!(
+        "Codex Skill    {}",
+        value["codex"]["skill"].as_str().unwrap_or("not checked")
+    );
+    println!("MCP server     available (`flect mcp`)");
+    println!(
         "\n{}",
         if value["ready"].as_bool().unwrap_or(false) {
             "Ready."

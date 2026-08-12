@@ -84,6 +84,11 @@ enum Command {
     },
     /// Diagnose the local Git, repository, and Flect configuration.
     Doctor,
+    /// Inspect or update the repository's human-readable configuration.
+    Config {
+        #[command(subcommand)]
+        command: ConfigCommand,
+    },
     /// Serve Flect tools over the Model Context Protocol on stdio.
     Mcp,
     /// Run the reproducible semantic-verification evaluation suite.
@@ -116,6 +121,19 @@ enum SkillCommand {
     Status,
     /// Remove only unmodified files owned by Flect.
     Uninstall,
+}
+
+#[derive(Debug, Subcommand)]
+enum ConfigCommand {
+    /// Print the effective validated configuration.
+    Show,
+    /// Set one supported configuration key.
+    Set {
+        /// Dotted key, such as runner.kind or runner.model.
+        key: String,
+        /// New value.
+        value: String,
+    },
 }
 
 #[tokio::main]

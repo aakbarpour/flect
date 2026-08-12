@@ -99,6 +99,40 @@ fn doctor_reports_api_credential_readiness_without_exposing_values() {
     );
     assert_eq!(report["runner"]["credential"]["available"], false);
     assert_eq!(report["ready"], false);
+    assert_eq!(report["mcp"]["available"], true);
+    assert!(report["codex"]["available"].is_boolean());
+}
+
+#[test]
+fn config_commands_set_and_show_validated_runner_values() {
+    let repository = tempfile::tempdir().unwrap();
+    git(repository.path(), ["init", "-b", "main"]);
+    assert_success(flect(repository.path(), ["init"]));
+
+    assert_success(flect(
+        repository.path(),
+        ["config", "set", "runner.model", "custom-model"],
+    ));
+    assert_success(flect(
+        repository.path(),
+        ["config", "set", "runner.kind", "api"],
+    ));
+    let output = flect(repository.path(), ["--json", "config", "show"]);
+    assert_success(&output);
+    let config: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(config["runner"]["kind"], "api");
+    assert_eq!(config["runner"]["model"], "custom-model");
+    assert!(
+        !fs::read_to_string(repository.path().join("flect.toml"))
+            .unwrap()
+            .contains("API key")
+    );
+
+    let invalid = flect(
+        repository.path(),
+        ["config", "set", "runner.confidence_threshold", "2"],
+    );
+    assert!(!invalid.status.success());
 }
 
 fn flect<const N: usize>(directory: &Path, arguments: [&str; N]) -> Output {

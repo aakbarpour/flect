@@ -22,7 +22,7 @@ use serde::de::DeserializeOwned;
 use serde_json::{Value, json};
 
 use crate::report;
-use crate::{Command, SkillCommand};
+use crate::{Command, ConfigCommand, SkillCommand};
 
 struct RoutedOutput<T> {
     value: T,
@@ -81,6 +81,7 @@ pub async fn run(command: Command, json_output: bool) -> Result<()> {
         }
         Command::Inspect { run, context } => inspect(run.as_deref(), context, json_output),
         Command::Doctor => doctor(json_output),
+        Command::Config { command } => config(&command, json_output),
         Command::Mcp => crate::mcp::run(),
         Command::Eval {
             suite,
@@ -315,7 +316,7 @@ fn doctor(json_output: bool) -> Result<()> {
     };
     let current = std::env::current_dir().into_diagnostic()?;
     let repository = GitRepository::discover(&current);
-    let (root, config_status, runner) = match repository {
+    let (root, config_status, runner) = match &repository {
         Ok(repository) => match load_config(repository.root()) {
             Ok(config) => {
                 let credential = if config.runner.kind == RunnerKind::Api {
@@ -356,11 +357,31 @@ fn doctor(json_output: bool) -> Result<()> {
         .as_object()
         .is_none_or(|credential| credential["available"].as_bool().unwrap_or(false));
     let ready = git_version != "unavailable" && config_status == "valid" && credential_ready;
+    let codex = ProcessCommand::new("codex").arg("--version").output();
+    let codex_version = match codex {
+        Ok(output) if output.status.success() => {
+            Some(String::from_utf8_lossy(&output.stdout).trim().to_owned())
+        }
+        _ => None,
+    };
+    let skill_status = repository
+        .as_ref()
+        .ok()
+        .and_then(|repository| crate::skill::status_label(repository.root()).ok());
     let result = json!({
         "git": git_version,
         "repository": root,
         "configuration": config_status,
         "runner": runner,
+        "codex": {
+            "available": codex_version.is_some(),
+            "version": codex_version,
+            "skill": skill_status.unwrap_or_else(|| "not_checked".to_owned()),
+        },
+        "mcp": {
+            "available": true,
+            "command": "flect mcp",
+        },
         "ready": ready,
     });
     if json_output {
@@ -374,6 +395,85 @@ fn doctor(json_output: bool) -> Result<()> {
 fn skill(command: &SkillCommand, json_output: bool) -> Result<()> {
     let repository = discover_current()?;
     crate::skill::run(repository.root(), command, json_output)
+}
+
+fn config(command: &ConfigCommand, json_output: bool) -> Result<()> {
+    let repository = discover_current()?;
+    let path = repository.root().join("flect.toml");
+    let mut config = Config::load(&path).map_err(to_report)?;
+    if let ConfigCommand::Set { key, value } = command {
+        set_config_value(&mut config, key, value)?;
+        config.validate().map_err(to_report)?;
+        let document = toml::to_string_pretty(&config)
+            .into_diagnostic()
+            .wrap_err("could not serialize Flect configuration")?;
+        fs::write(&path, document)
+            .into_diagnostic()
+            .wrap_err_with(|| format!("could not write {}", path.display()))?;
+    }
+    if json_output {
+        print_json(&config)
+    } else {
+        println!(
+            "{}",
+            toml::to_string_pretty(&config)
+                .into_diagnostic()
+                .wrap_err("could not serialize Flect configuration")?
+        );
+        Ok(())
+    }
+}
+
+fn set_config_value(config: &mut Config, key: &str, value: &str) -> Result<()> {
+    match key {
+        "runner.kind" => {
+            config.runner.kind = match value {
+                "mock" => RunnerKind::Mock,
+                "api" => RunnerKind::Api,
+                _ => return Err(miette!("runner.kind must be `mock` or `api`")),
+            };
+        }
+        "runner.base_url" => value.clone_into(&mut config.runner.base_url),
+        "runner.api_key_env" => value.clone_into(&mut config.runner.api_key_env),
+        "runner.model" => config.runner.model = optional_config_string(value),
+        "runner.fallback_model" => config.runner.fallback_model = optional_config_string(value),
+        "runner.reasoning_effort" => value.clone_into(&mut config.runner.reasoning_effort),
+        "runner.escalate_on_uncertain" => {
+            config.runner.escalate_on_uncertain = parse_config_bool(key, value)?;
+        }
+        "runner.confidence_threshold" => {
+            config.runner.confidence_threshold = value
+                .parse()
+                .into_diagnostic()
+                .wrap_err("runner.confidence_threshold must be a number")?;
+        }
+        "verification.context" => {
+            config.verification.context = value.parse().map_err(|error| miette!("{error}"))?;
+        }
+        "verification.include_untracked" => {
+            config.verification.include_untracked = parse_config_bool(key, value)?;
+        }
+        "privacy.respect_gitignore" => {
+            config.privacy.respect_gitignore = parse_config_bool(key, value)?;
+        }
+        _ => {
+            return Err(miette!(
+                "unsupported configuration key `{key}`; run `flect config show` for available fields"
+            ));
+        }
+    }
+    Ok(())
+}
+
+fn optional_config_string(value: &str) -> Option<String> {
+    (!matches!(value, "none" | "null" | "-")).then(|| value.to_owned())
+}
+
+fn parse_config_bool(key: &str, value: &str) -> Result<bool> {
+    value
+        .parse()
+        .into_diagnostic()
+        .wrap_err_with(|| format!("{key} must be true or false"))
 }
 
 fn build_bundle(repository: &GitRepository, config: &Config, base: &str) -> Result<BlindBundle> {
