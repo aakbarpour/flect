@@ -35,7 +35,7 @@ pub enum AgentWorkflowError {
         path: String,
         source: std::io::Error,
     },
-    #[error("agent workspace must be outside the repository and cannot use a symlink boundary")]
+    #[error("agent workspace must resolve outside the repository")]
     UnsafeWorkspace,
     #[error("invalid agent job identifier `{0}`")]
     InvalidJobId(String),
@@ -80,12 +80,8 @@ impl AgentService {
         workspace_root: PathBuf,
     ) -> Result<Self, AgentWorkflowError> {
         let repository_root = canonical_existing(repository.root())?;
-        if workspace_root.exists() {
-            let workspace = canonical_existing(&workspace_root)?;
-            if workspace.starts_with(&repository_root) || has_symlink_component(&workspace_root)? {
-                return Err(AgentWorkflowError::UnsafeWorkspace);
-            }
-        } else if workspace_root.starts_with(repository.root()) {
+        let workspace = resolve_with_missing(&workspace_root)?;
+        if workspace.starts_with(&repository_root) {
             return Err(AgentWorkflowError::UnsafeWorkspace);
         }
         Ok(Self {
@@ -317,7 +313,9 @@ impl AgentService {
         validate_job_id(job_id)?;
         fs::create_dir_all(&self.workspace_root)
             .map_err(|source| workspace_error(&self.workspace_root, source))?;
-        if has_symlink_component(&self.workspace_root)? {
+        let repository_root = canonical_existing(self.repository.root())?;
+        let workspace_root = canonical_existing(&self.workspace_root)?;
+        if workspace_root.starts_with(repository_root) {
             return Err(AgentWorkflowError::UnsafeWorkspace);
         }
         let workspace = self.workspace_root.join(job_id);
@@ -510,18 +508,23 @@ fn canonical_existing(path: &Path) -> Result<PathBuf, AgentWorkflowError> {
     fs::canonicalize(path).map_err(|source| workspace_error(path, source))
 }
 
-fn has_symlink_component(path: &Path) -> Result<bool, AgentWorkflowError> {
-    let mut current = PathBuf::new();
-    for component in path.components() {
-        current.push(component);
-        match fs::symlink_metadata(&current) {
-            Ok(metadata) if metadata.file_type().is_symlink() => return Ok(true),
-            Ok(_) => {}
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(false),
-            Err(source) => return Err(workspace_error(&current, source)),
-        }
+fn resolve_with_missing(path: &Path) -> Result<PathBuf, AgentWorkflowError> {
+    let mut existing = path;
+    let mut missing = Vec::new();
+    while !existing.exists() {
+        let name = existing
+            .file_name()
+            .ok_or(AgentWorkflowError::UnsafeWorkspace)?;
+        missing.push(name.to_owned());
+        existing = existing
+            .parent()
+            .ok_or(AgentWorkflowError::UnsafeWorkspace)?;
     }
-    Ok(false)
+    let mut resolved = canonical_existing(existing)?;
+    for component in missing.iter().rev() {
+        resolved.push(component);
+    }
+    Ok(resolved)
 }
 
 fn workspace_error(path: &Path, source: std::io::Error) -> AgentWorkflowError {
