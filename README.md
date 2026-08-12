@@ -21,6 +21,38 @@ Patch ──> BlindGuard ──> blind reconstruction┘
 
 BlindGuard makes task separation structural: the bundle type contains patch evidence, selected context, a manifest, and a blindness report—no task, conversation, forward spec, branch name, or commit message. It cannot guarantee that source code or comments do not themselves reveal task semantics; Flect reports that limitation rather than implying a cryptographic guarantee.
 
+## Choose a mode
+
+Direct API mode:
+
+```console
+flect init
+flect config set runner.model gpt-5.6-luna
+flect config set runner.fallback_model gpt-5.6-terra
+flect config set runner.kind api
+flect start --task "Fix token expiry without changing legacy auth"
+# code and normal tests
+flect verify --dry-run
+flect verify
+```
+
+Codex Skill mode:
+
+```console
+flect init
+flect skill install
+# Ask Codex: Use Flect verification for this implementation.
+```
+
+Codex MCP mode:
+
+```console
+codex mcp add flect -- /absolute/path/to/flect mcp
+codex mcp list
+```
+
+See the copyable [getting-started workflows](docs/getting-started.md) for credentials, custom providers, privacy checks, verdict handling, and current limitations.
+
 ## Build
 
 Flect uses stable Rust and the 2024 edition.
@@ -130,6 +162,7 @@ Dry-run output includes the provider, model, context policy, included patch/cont
 - `flect verify` — reconstruct intent and persist a structured verdict.
 - `flect echo [REVISION]` — describe a patch without needing an original task.
 - `flect doctor` — check Git, repository discovery, configuration, and runner readiness.
+- `flect config show|set KEY VALUE` — inspect or update common configuration fields.
 - `flect mcp` — serve the five Flect tools over stdio MCP.
 - `flect eval` — run deterministic fixtures or an explicitly opt-in model comparison.
 - `flect skill install|status|uninstall` — safely manage the project-local Codex Skill.

@@ -244,7 +244,12 @@ patterns = []
 "#
     }
 
-    fn validate(&self) -> Result<(), ConfigError> {
+    /// Validates cross-field configuration invariants.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ConfigError`] for unsupported versions or invalid values.
+    pub fn validate(&self) -> Result<(), ConfigError> {
         if self.version != 1 {
             return Err(ConfigError::UnsupportedVersion(self.version));
         }
