@@ -65,8 +65,10 @@ fn offline_suite_is_reproducible_and_never_requires_api_access() {
             .unwrap()
             .iter()
             .all(|case| {
-                case["verifier_stage"]["schema_decode_status"] == "succeeded"
-                    && case["judge_stage"]["schema_decode_status"] == "succeeded"
+                case["verifier_stage"]["primary"]["schema_decode_status"] == "succeeded"
+                    && case["verifier_stage"]["fallback"].is_null()
+                    && case["judge_stage"]["primary"]["schema_decode_status"] == "succeeded"
+                    && case["judge_stage"]["fallback"].is_null()
                     && case["evidence_validation_status"] == "succeeded"
                     && case["failure_category"].is_null()
             })
