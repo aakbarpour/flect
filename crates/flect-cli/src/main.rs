@@ -2,6 +2,7 @@
 
 mod app;
 mod report;
+mod skill;
 
 use std::path::PathBuf;
 
@@ -81,6 +82,21 @@ enum Command {
     },
     /// Diagnose the local Git, repository, and Flect configuration.
     Doctor,
+    /// Manage the project-local Codex Skill integration.
+    Skill {
+        #[command(subcommand)]
+        command: SkillCommand,
+    },
+}
+
+#[derive(Debug, Subcommand)]
+enum SkillCommand {
+    /// Install the bundled Skill under `.agents/skills/flect`.
+    Install,
+    /// Report whether the project-local Skill is current, missing, or modified.
+    Status,
+    /// Remove only unmodified files owned by Flect.
+    Uninstall,
 }
 
 #[tokio::main]

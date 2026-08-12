@@ -1,0 +1,4 @@
+interface:
+  display_name: "Flect Verification"
+  short_description: "Run blind intent verification with Flect"
+  default_prompt: "Use $flect to verify my implementation against the captured task."
