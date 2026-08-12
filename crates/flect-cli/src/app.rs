@@ -374,6 +374,7 @@ fn doctor(json_output: bool) -> Result<()> {
         .as_ref()
         .ok()
         .and_then(|repository| crate::skill::status_label(repository.root()).ok());
+    let verification_modes = verification_modes(&runner, credential_ready);
     let result = json!({
         "git": git_version,
         "repository": root,
@@ -387,7 +388,10 @@ fn doctor(json_output: bool) -> Result<()> {
         "mcp": {
             "available": true,
             "command": "flect mcp",
+            "protocol": "2025-11-25",
+            "lifecycle": "initialize_then_notifications/initialized",
         },
+        "verification_modes": verification_modes,
         "ready": ready,
     });
     if json_output {
@@ -396,6 +400,26 @@ fn doctor(json_output: bool) -> Result<()> {
         report::doctor(&result);
     }
     Ok(())
+}
+
+fn verification_modes(runner: &Value, credential_ready: bool) -> Value {
+    let api_configured = runner["kind"] == "api";
+    let api_ready = api_configured && credential_ready;
+    json!({
+        "api": {
+            "configured": api_configured,
+            "ready": api_ready,
+            "isolation": if api_ready { "strict" } else { "unknown" },
+        },
+        "codex_agent": {
+            "readiness": "unknown",
+            "subagent_spawn": "unknown",
+            "no_parent_context": "unknown",
+            "model_override": "unknown",
+            "workspace_isolation": "structural",
+            "note": "Flect cannot detect the active Codex collaboration tool surface; validate it at orchestration time",
+        },
+    })
 }
 
 fn skill(command: &SkillCommand, json_output: bool) -> Result<()> {

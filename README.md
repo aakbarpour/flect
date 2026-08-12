@@ -8,7 +8,7 @@ It gives an independent verifier the patch without the original task, reconstruc
 
 Tests ask whether the code works. Flect asks whether you built the right thing.
 
-> **Project status:** Milestones 0, 1, and the core Milestone 2 semantic pipeline are implemented. Flect can run deterministic offline verification or use an OpenAI-compatible Responses endpoint for forward analysis, structurally blind reconstruction, semantic reconciliation, and bounded model escalation. Project-local Codex Skill and stdio MCP integrations are included; evaluation and release packaging remain in progress.
+> **Project status:** The MVP verification, evaluation, packaging, Codex Skill, and stdio MCP workflows are implemented. Flect supports deterministic offline tests, a Responses-compatible API mode, and a Codex-native mode with fresh verifier and judge handoffs. No public model benchmark or tagged release is claimed here.
 
 ## How it works
 
@@ -43,6 +43,8 @@ flect init
 flect skill install
 # Ask Codex: Use Flect verification for this implementation.
 ```
+
+When the active Codex runtime exposes fresh subagents, the Skill uses a no-parent-context verifier followed by a different fresh reconciliation judge. Flect supplies sanitized read-only resources and validates both typed submissions. This is reported as `structural` isolation because a shared runtime filesystem is not an operating-system sandbox.
 
 Codex MCP mode:
 
@@ -163,7 +165,7 @@ Dry-run output includes the provider, model, context policy, included patch/cont
 - `flect echo [REVISION]` — describe a patch without needing an original task.
 - `flect doctor` — check Git, repository discovery, configuration, and runner readiness.
 - `flect config show|set KEY VALUE` — inspect or update common configuration fields.
-- `flect mcp` — serve the five Flect tools over stdio MCP.
+- `flect mcp` — serve automated and agent-mediated Flect tools over stdio MCP.
 - `flect eval` — run deterministic fixtures or an explicitly opt-in model comparison.
 - `flect skill install|status|uninstall` — safely manage the project-local Codex Skill.
 
@@ -180,11 +182,11 @@ flect skill status
 
 Installation targets `.agents/skills/flect`, is idempotent, and refuses to overwrite modified content. `flect skill uninstall` removes only files whose contents still exactly match the Flect-owned bundle; modified or additional files are preserved.
 
-The Skill orchestrates the CLI lifecycle but does not perform verification itself. The active Codex agent knows the task and is not blind. “Strict blind verification” refers only to Flect's API-backed backward request containing the structural `BlindBundle`; mock mode remains an offline baseline.
+The Skill keeps the active implementation agent out of the verifier role. In Codex-native mode it requires a fresh child with no inherited turns and a distinct fresh judge; in API mode Flect makes the configured Responses-compatible calls. See [isolation assurance](skills/flect/references/isolation.md) before describing either result.
 
 ## Codex MCP
 
-`flect mcp` exposes `flect_start`, `flect_inspect`, `flect_echo`, `flect_verify`, and `flect_get_result` through a local stdio server. It delegates to the same CLI pipeline and state store rather than maintaining separate verification behavior. See [Codex MCP integration](docs/mcp.md) for current CLI and `.codex/config.toml` setup.
+`flect mcp` exposes the automated tools plus `flect_prepare_blind`, `flect_submit_echo`, `flect_prepare_reconciliation`, and `flect_submit_verdict`. Agent handoff tools call the shared `flect-app` service directly; all modes converge on the same domain records and project-local state. See [Codex MCP integration](docs/mcp.md) for lifecycle, errors, and `.codex/config.toml` setup.
 
 ## Evaluation
 

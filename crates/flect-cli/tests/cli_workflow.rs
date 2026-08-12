@@ -100,6 +100,17 @@ fn doctor_reports_api_credential_readiness_without_exposing_values() {
     assert_eq!(report["runner"]["credential"]["available"], false);
     assert_eq!(report["ready"], false);
     assert_eq!(report["mcp"]["available"], true);
+    assert_eq!(report["mcp"]["protocol"], "2025-11-25");
+    assert_eq!(report["verification_modes"]["api"]["configured"], true);
+    assert_eq!(report["verification_modes"]["api"]["ready"], false);
+    assert_eq!(
+        report["verification_modes"]["codex_agent"]["readiness"],
+        "unknown"
+    );
+    assert_eq!(
+        report["verification_modes"]["codex_agent"]["workspace_isolation"],
+        "structural"
+    );
     assert!(report["codex"]["available"].is_boolean());
 }
 

@@ -31,6 +31,9 @@ fn stdio_session_discovers_tools_and_persists_strict_blind_results() {
     git(repository.path(), ["commit", "-m", "configure flect"]);
 
     let mut client = McpClient::spawn(repository.path());
+    let before_initialize =
+        client.request(&json!({"jsonrpc": "2.0", "id": 0, "method": "tools/list"}));
+    assert_eq!(before_initialize["error"]["code"], -32002);
     let initialized = client.request(&json!({
         "jsonrpc": "2.0", "id": 1, "method": "initialize",
         "params": {"protocolVersion": "2025-11-25", "capabilities": {}, "clientInfo": {"name": "flect-tests", "version": "1"}}
@@ -38,6 +41,11 @@ fn stdio_session_discovers_tools_and_persists_strict_blind_results() {
     assert_eq!(initialized["result"]["serverInfo"]["name"], "flect");
     assert_eq!(initialized["result"]["protocolVersion"], "2025-11-25");
     client.notify(&json!({"jsonrpc": "2.0", "method": "notifications/initialized"}));
+    let duplicate_initialize = client.request(&json!({
+        "jsonrpc": "2.0", "id": 99, "method": "initialize",
+        "params": {"protocolVersion": "2025-11-25"}
+    }));
+    assert_eq!(duplicate_initialize["error"]["code"], -32600);
 
     let discovery =
         client.request(&json!({"jsonrpc": "2.0", "id": 2, "method": "tools/list", "params": {}}));
