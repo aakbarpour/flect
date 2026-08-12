@@ -14,10 +14,10 @@ use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use serde_json::Value;
 use thiserror::Error;
 
-use crate::{EvidenceError, validate_verdict_evidence};
+use crate::{EvidenceError, materialize_judge_verdict};
 
 const VERIFIER_INSTRUCTIONS: &str = "You are the blind Flect verifier. You have not been given the original task. Do not attempt to discover it. Inspect only the supplied sanitized patch evidence. Determine what behavior this patch appears to add, remove, or change. Return only a valid EchoedSpec matching the supplied schema. Each affected_scope entry is an object: file must exactly equal a path in the supplied manifest; symbol is optional descriptive function, class, or region detail and is not a path. Do not perform general style review. Do not invent files, lines, requirements, or motivations. Preserve uncertainty.";
-const JUDGE_INSTRUCTIONS: &str = "You are the Flect reconciliation judge. Compare IntendedSpec with EchoedSpec. Do not review unrelated code quality. Return only a valid Verdict. Use SAME only with no material divergence; PARTIAL for missing requirements, constraints, scope creep, or meaningful unexpected behavior; DIFFERENT for a materially different or contradictory change; UNCERTAIN for insufficient evidence. Never fabricate evidence. Follow evidence_contract exactly: use only its file and hunk IDs/ranges, and associate each negative finding with its stable finding ID. SAME needs no negative-finding evidence.";
+const JUDGE_INSTRUCTIONS: &str = "You are the Flect reconciliation judge. Return JSON only: one object matching verdict_schema, with no wrapper, prose, Markdown, or extra keys. Compare IntendedSpec with EchoedSpec only. alignment must be one of the allowed values in evidence_contract. Put every negative finding in its matching array. Every nonempty negative-finding category needs evidence that names that category and, when patch-local, a listed stable hunk_id. Never invent a file, hunk ID, range, or finding. SAME has no negative findings or evidence. Flect derives actions, persisted finding IDs, and trusted locations.";
 static JOB_SEQUENCE: AtomicU64 = AtomicU64::new(0);
 
 #[derive(Debug, Error)]
@@ -269,7 +269,7 @@ impl AgentService {
             echoed_spec,
             available_evidence: blind.job.bundle.patch.files.clone(),
             evidence_contract: evidence_contract(&blind.job.bundle),
-            verdict_schema: strict_schema::<flect_core::Verdict>()?,
+            verdict_schema: strict_schema::<flect_core::JudgeVerdict>()?,
         };
         self.save_reconciliation_state(&ReconciliationState {
             version: 1,
@@ -298,13 +298,13 @@ impl AgentService {
         if state.job.job_id != submission.job_id {
             return Err(AgentWorkflowError::JobMismatch(state.job.job_id));
         }
-        validate_verdict_evidence(&submission.verdict, &state.bundle)?;
+        let verdict = materialize_judge_verdict(submission.verdict, &state.bundle)?;
         let record = VerificationRecord {
             version: 1,
             run_id: state.job.run_id.clone(),
             bundle: state.bundle.clone(),
             echoed_spec: state.job.echoed_spec.clone(),
-            verdict: submission.verdict,
+            verdict,
             isolation: IsolationLevel::Structural,
             model_calls: vec![
                 agent_call(
@@ -514,6 +514,7 @@ impl AgentService {
 }
 
 fn evidence_contract(bundle: &BlindBundle) -> Value {
+    let mut hunk_index = 0_u32;
     let files = bundle.patch.files.iter().map(|file| {
         let hunks = file.patch.split("@@ ").skip(1).filter_map(|part| {
             let hunk = format!("@@ {part}");
@@ -522,19 +523,36 @@ fn evidence_contract(bundle: &BlindBundle) -> Value {
             let (start, count) = plus[1..].split_once(',').unwrap_or((&plus[1..], "1"));
             let start = start.parse::<u32>().ok()?;
             let count = count.parse::<u32>().ok()?;
-            Some(serde_json::json!({"hunk": hunk, "line_start": start, "line_end": start.saturating_add(count.saturating_sub(1))}))
+            let id = format!("hunk/{hunk_index}");
+            hunk_index = hunk_index.saturating_add(1);
+            Some(serde_json::json!({"hunk_id": id, "hunk": hunk, "line_start": start, "line_end": start.saturating_add(count.saturating_sub(1))}))
         }).collect::<Vec<_>>();
         serde_json::json!({"file": file.path, "hunks": hunks})
     }).collect::<Vec<_>>();
     serde_json::json!({
-        "version": 1,
-        "finding_id_format": "<category>/<zero-based-index>; categories: missing_requirements, unrequested_changes, violated_constraints, potential_side_effects",
-        "rules": [
-            "Evidence.file must equal a listed file.",
-            "Evidence.patch_hunk, when present, must exactly equal a listed hunk; line_start and line_end must be within that hunk's listed range.",
-            "Each negative finding must be referenced by at least one Evidence.finding_ids entry. SAME requires no negative-finding evidence.",
-            "Evidence.finding_ids must use only finding IDs that exist in the submitted Verdict."
+        "version": 2,
+        "allowed_alignments": ["SAME", "PARTIAL", "DIFFERENT", "UNCERTAIN"],
+        "allowed_actions": {
+            "SAME": ["SHIP"],
+            "PARTIAL": ["REVISE_PATCH", "REVISE_BOTH"],
+            "DIFFERENT": ["REVISIT_REASONING", "REVISE_BOTH"],
+            "UNCERTAIN": ["REQUEST_MORE_CONTEXT"]
+        },
+        "available_finding_categories": [
+            "missing_requirements",
+            "unrequested_changes",
+            "violated_constraints",
+            "potential_side_effects"
         ],
+        "persisted_finding_id_format": "Flect derives <category>/<zero-based-index> from each nonempty submitted category.",
+        "rules": [
+            "Return the verdict_schema object directly; do not add a verdict wrapper.",
+            "recommended_action, file, patch text, line ranges, and persisted finding IDs are derived by Flect and must not be emitted.",
+            "Every nonempty negative-finding category needs an evidence item with that finding_categories value.",
+            "Evidence.hunk_id, when present, must equal one listed stable hunk ID. Omit hunk_id only when no patch location is available.",
+            "SAME requires all negative-finding arrays and evidence to be empty."
+        ],
+        "evidence_example": files.iter().find_map(|file| file["hunks"].as_array().and_then(|hunks| hunks.first()).map(|hunk| serde_json::json!({"finding_categories": ["violated_constraints"], "hunk_id": hunk["hunk_id"], "description": "The changed setting violates the constraint."}))),
         "files": files
     })
 }

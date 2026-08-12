@@ -37,7 +37,9 @@ impl IntendedSpec {
 }
 
 /// How a path changed relative to the captured base revision.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize, JsonSchema,
+)]
 #[serde(rename_all = "snake_case")]
 pub enum FileStatus {
     Added,
@@ -309,6 +311,55 @@ pub struct Verdict {
     pub recommended_action: RecommendedAction,
 }
 
+/// Minimal verdict payload emitted by an external reconciliation judge.
+///
+/// Flect derives the persisted action, agreement list, and trusted evidence
+/// locations. This keeps the agent-facing contract small without relaxing
+/// validation of the semantic findings or their evidence associations.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct JudgeVerdict {
+    pub alignment: Alignment,
+    #[serde(default)]
+    pub missing_requirements: Vec<String>,
+    #[serde(default)]
+    pub unrequested_changes: Vec<String>,
+    #[serde(default)]
+    pub violated_constraints: Vec<String>,
+    #[serde(default)]
+    pub potential_side_effects: Vec<String>,
+    #[serde(default)]
+    pub uncertainties: Vec<String>,
+    #[serde(default)]
+    pub evidence: Vec<JudgeEvidence>,
+    #[serde(default)]
+    pub confidence: Option<f64>,
+}
+
+/// A judge's association between negative findings and one trusted patch hunk.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct JudgeEvidence {
+    /// Categories whose emitted findings this evidence supports.
+    pub finding_categories: Vec<FindingCategory>,
+    /// A stable identifier from the reconciliation job's evidence contract.
+    #[serde(default)]
+    pub hunk_id: Option<String>,
+    pub description: String,
+}
+
+/// A negative-finding category that Flect expands into stable persisted IDs.
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize, JsonSchema,
+)]
+#[serde(rename_all = "snake_case")]
+pub enum FindingCategory {
+    MissingRequirements,
+    UnrequestedChanges,
+    ViolatedConstraints,
+    PotentialSideEffects,
+}
+
 /// Safe, persisted observability for one semantic model stage.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
@@ -430,7 +481,7 @@ pub struct ReconciliationAgentJob {
 #[serde(deny_unknown_fields)]
 pub struct ReconciliationAgentSubmission {
     pub job_id: String,
-    pub verdict: Verdict,
+    pub verdict: JudgeVerdict,
     pub model: Option<String>,
     #[serde(default)]
     pub model_selection: AgentModelSelection,

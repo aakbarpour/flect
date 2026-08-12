@@ -1,4 +1,6 @@
-use flect_core::{Alignment, BlindBundle, Evidence, RecommendedAction, Verdict};
+use flect_core::{
+    Alignment, BlindBundle, Evidence, FindingCategory, JudgeVerdict, RecommendedAction, Verdict,
+};
 use thiserror::Error;
 
 #[derive(Debug, Error)]
@@ -7,6 +9,8 @@ pub enum EvidenceError {
     UnknownFile(String),
     #[error("evidence hunk is not present in patch for `{0}`")]
     UnknownHunk(String),
+    #[error("evidence references unavailable stable hunk ID `{0}`")]
+    UnknownHunkId(String),
     #[error("evidence line range is invalid for the supplied patch hunk in `{0}`")]
     InvalidLineRange(String),
     #[error("negative finding `{0}` has no corresponding evidence association")]
@@ -18,6 +22,61 @@ pub enum EvidenceError {
         alignment: Alignment,
         action: RecommendedAction,
     },
+    #[error("evidence category `{0}` has no emitted negative findings")]
+    EmptyFindingCategory(String),
+}
+
+/// Converts the compact judge payload into Flect's persisted verdict.
+///
+/// This resolves only job-provided hunk IDs to immutable patch locations and
+/// derives action and stable finding IDs. It does not repair semantic output.
+///
+/// # Errors
+///
+/// Returns [`EvidenceError`] when an evidence category, hunk ID, or resulting
+/// trusted verdict fails validation.
+pub fn materialize_judge_verdict(
+    judge: JudgeVerdict,
+    bundle: &BlindBundle,
+) -> Result<Verdict, EvidenceError> {
+    let mut verdict = Verdict {
+        alignment: judge.alignment,
+        agreements: Vec::new(),
+        missing_requirements: judge.missing_requirements,
+        unrequested_changes: judge.unrequested_changes,
+        violated_constraints: judge.violated_constraints,
+        potential_side_effects: judge.potential_side_effects,
+        uncertainties: judge.uncertainties,
+        evidence: Vec::new(),
+        confidence: judge.confidence.unwrap_or(0.5),
+        recommended_action: action_for(judge.alignment),
+    };
+    let ids = finding_ids_by_category(&verdict);
+    for evidence in judge.evidence {
+        let mut finding_ids = Vec::new();
+        for category in evidence.finding_categories {
+            let category_ids = ids
+                .get(&category)
+                .filter(|ids| !ids.is_empty())
+                .ok_or_else(|| EvidenceError::EmptyFindingCategory(category_name(category)))?;
+            finding_ids.extend(category_ids.iter().cloned());
+        }
+        let (file, patch_hunk, line_start, line_end) = match evidence.hunk_id {
+            Some(id) => resolve_hunk(bundle, &id)?,
+            None => (None, None, None, None),
+        };
+        verdict.evidence.push(Evidence {
+            file,
+            line_start,
+            line_end,
+            patch_hunk,
+            finding_ids,
+            description: evidence.description,
+            confidence: verdict.confidence,
+        });
+    }
+    validate_verdict_evidence(&verdict, bundle)?;
+    Ok(verdict)
 }
 
 /// Rejects fabricated evidence and inconsistent verdict/action combinations.
@@ -190,6 +249,89 @@ fn validate_action(verdict: &Verdict) -> Result<(), EvidenceError> {
             action: verdict.recommended_action,
         })
     }
+}
+
+fn action_for(alignment: Alignment) -> RecommendedAction {
+    match alignment {
+        Alignment::Same => RecommendedAction::Ship,
+        Alignment::Partial => RecommendedAction::RevisePatch,
+        Alignment::Different => RecommendedAction::RevisitReasoning,
+        Alignment::Uncertain => RecommendedAction::RequestMoreContext,
+    }
+}
+
+fn finding_ids_by_category(
+    verdict: &Verdict,
+) -> std::collections::BTreeMap<FindingCategory, Vec<String>> {
+    [
+        (
+            FindingCategory::MissingRequirements,
+            "missing_requirements",
+            &verdict.missing_requirements,
+        ),
+        (
+            FindingCategory::UnrequestedChanges,
+            "unrequested_changes",
+            &verdict.unrequested_changes,
+        ),
+        (
+            FindingCategory::ViolatedConstraints,
+            "violated_constraints",
+            &verdict.violated_constraints,
+        ),
+        (
+            FindingCategory::PotentialSideEffects,
+            "potential_side_effects",
+            &verdict.potential_side_effects,
+        ),
+    ]
+    .into_iter()
+    .map(|(category, name, findings)| {
+        (
+            category,
+            findings
+                .iter()
+                .enumerate()
+                .map(|(index, _)| format!("{name}/{index}"))
+                .collect(),
+        )
+    })
+    .collect()
+}
+
+fn category_name(category: FindingCategory) -> String {
+    match category {
+        FindingCategory::MissingRequirements => "missing_requirements",
+        FindingCategory::UnrequestedChanges => "unrequested_changes",
+        FindingCategory::ViolatedConstraints => "violated_constraints",
+        FindingCategory::PotentialSideEffects => "potential_side_effects",
+    }
+    .to_owned()
+}
+
+type TrustedLocation = (Option<String>, Option<String>, Option<u32>, Option<u32>);
+
+fn resolve_hunk(bundle: &BlindBundle, requested: &str) -> Result<TrustedLocation, EvidenceError> {
+    let mut index = 0_u32;
+    for changed in &bundle.patch.files {
+        for part in changed.patch.split("@@ ").skip(1) {
+            let hunk = format!("@@ {part}");
+            let id = format!("hunk/{index}");
+            index = index.saturating_add(1);
+            if id != requested {
+                continue;
+            }
+            let (line_start, line_end) = new_line_range(&hunk)
+                .ok_or_else(|| EvidenceError::UnknownHunkId(requested.to_owned()))?;
+            return Ok((
+                Some(changed.path.clone()),
+                Some(hunk),
+                Some(line_start),
+                Some(line_end),
+            ));
+        }
+    }
+    Err(EvidenceError::UnknownHunkId(requested.to_owned()))
 }
 
 fn new_line_range(hunk: &str) -> Option<(u32, u32)> {
