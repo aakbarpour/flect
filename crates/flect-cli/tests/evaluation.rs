@@ -18,7 +18,30 @@ fn offline_suite_is_reproducible_and_never_requires_api_access() {
     let report: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
     assert_eq!(report["mode"], "offline");
     assert_eq!(report["profiles"][0]["metrics"]["cases"], 40);
+    assert_eq!(report["profiles"][0]["metrics"]["cases_attempted"], 40);
+    assert_eq!(report["profiles"][0]["metrics"]["cases_completed"], 40);
+    assert_eq!(report["profiles"][0]["metrics"]["cases_failed"], 0);
     assert_eq!(report["profiles"][0]["metrics"]["exact_verdicts"], 40);
+    assert_eq!(
+        report["profiles"][0]["metrics"]["overall_verdict_accuracy"]["denominator"],
+        40
+    );
+    assert_eq!(
+        report["profiles"][0]["metrics"]["completed_verdict_accuracy"]["denominator"],
+        40
+    );
+    assert_eq!(
+        report["profiles"][0]["metrics"]["bad_patch_detection"]["denominator"],
+        31
+    );
+    assert_eq!(
+        report["profiles"][0]["metrics"]["expected_uncertain_cases"],
+        3
+    );
+    assert_eq!(
+        report["profiles"][0]["metrics"]["finding_category_exact_match"]["numerator"],
+        40
+    );
     assert_eq!(report["profiles"][0]["metrics"]["requests"], 120);
     assert_eq!(
         report["profiles"][0]["metrics"]["evidence_ref_validation_failures"],
@@ -27,6 +50,26 @@ fn offline_suite_is_reproducible_and_never_requires_api_access() {
     assert_eq!(
         report["profiles"][0]["metrics"]["estimated_cost_usd"],
         serde_json::Value::Null
+    );
+    assert_eq!(
+        report["profiles"][0]["metrics"]["verifier_schema_compliance"]["numerator"],
+        40
+    );
+    assert_eq!(
+        report["profiles"][0]["metrics"]["judge_schema_compliance"]["numerator"],
+        40
+    );
+    assert!(
+        report["profiles"][0]["cases"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|case| {
+                case["verifier_stage"]["schema_decode_status"] == "succeeded"
+                    && case["judge_stage"]["schema_decode_status"] == "succeeded"
+                    && case["evidence_validation_status"] == "succeeded"
+                    && case["failure_category"].is_null()
+            })
     );
 
     let serialized = serde_json::to_string(&report).unwrap();
@@ -47,6 +90,7 @@ fn benchmark_ground_truth_and_canonical_subset_do_not_drift() {
         .filter(|case| case["subset"] == "canonical-5")
         .map(|case| {
             (
+                case["id"].as_str().unwrap(),
                 case["class"].as_str().unwrap(),
                 case["expected"]["verdict"].as_str().unwrap(),
             )
@@ -55,18 +99,21 @@ fn benchmark_ground_truth_and_canonical_subset_do_not_drift() {
     assert_eq!(
         canonical,
         vec![
-            ("correct_patch", "SAME"),
-            ("partial_implementation", "PARTIAL"),
-            ("scope_creep", "PARTIAL"),
-            ("constraint_violation", "PARTIAL"),
-            ("wrong_component", "DIFFERENT"),
+            ("canonical-01", "correct_patch", "SAME"),
+            ("canonical-02", "partial_implementation", "PARTIAL"),
+            ("canonical-03", "constraint_violation", "PARTIAL"),
+            ("canonical-04", "scope_creep", "PARTIAL"),
+            ("canonical-05", "wrong_component", "DIFFERENT"),
         ]
     );
     for case in cases {
         let findings = case["expected"]["important_findings"].as_array().unwrap();
         assert_eq!(
             findings.is_empty(),
-            case["expected"]["finding_category"].is_null()
+            case["expected"]["expected_finding_categories"]
+                .as_array()
+                .unwrap()
+                .is_empty()
         );
         assert!(!case["expected"]["rationale"].as_str().unwrap().is_empty());
     }

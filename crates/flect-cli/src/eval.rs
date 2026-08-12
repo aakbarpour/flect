@@ -4,15 +4,18 @@ use std::collections::BTreeMap;
 use std::fs;
 use std::io::{self, Write};
 use std::path::Path;
+use std::process::Command;
 use std::time::Duration;
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use flect_core::{
     Alignment, BlindBundle, BlindnessReport, BundleManifest, ContextFile, ContextPolicy,
-    EchoedSpec, IntendedSpec, IsolationEntry, IsolationKind, PatchSet, TaskInput, Verdict,
+    EchoedSpec, FindingCategory, IntendedSpec, IsolationEntry, IsolationKind, JudgeFinding,
+    JudgeVerdict, PatchSet, TaskInput, Verdict,
 };
 use flect_runner::{
     AgentRequest, AgentRunner, MockRunner, OpenAiResponsesConfig, OpenAiResponsesRunner,
-    RequestPurpose, RunnerMetadata, RunnerOutput, estimate_openai_cost,
+    RequestPurpose, RunnerError, RunnerMetadata, RunnerOutput, estimate_openai_cost,
 };
 use miette::{IntoDiagnostic, Result, WrapErr, miette};
 use schemars::{JsonSchema, schema_for};
@@ -49,7 +52,8 @@ struct EvalCase {
 struct Expected {
     verdict: Alignment,
     important_findings: Vec<String>,
-    finding_category: Option<String>,
+    #[serde(rename = "expected_finding_categories")]
+    finding_categories: Vec<String>,
     rationale: String,
 }
 
@@ -78,6 +82,10 @@ struct ApiProfile {
 struct EvalReport {
     version: u32,
     suite: String,
+    suite_hash: Option<String>,
+    source_revision: Option<String>,
+    generated_at: String,
+    working_tree_dirty: Option<bool>,
     mode: String,
     profiles: Vec<ProfileReport>,
     limitations: Vec<String>,
@@ -104,20 +112,28 @@ struct ProfileSummary {
 struct Metrics {
     cases: usize,
     cases_attempted: usize,
-    cases_persisted: usize,
+    cases_completed: usize,
+    cases_failed: usize,
+    failure_counts: BTreeMap<String, usize>,
     exact_verdicts: usize,
-    verdict_accuracy: Rate,
+    overall_verdict_accuracy: Rate,
+    completed_verdict_accuracy: Rate,
     per_class_accuracy: BTreeMap<String, Rate>,
     confusion_matrix: BTreeMap<String, BTreeMap<String, usize>>,
+    forward_schema_compliance: Rate,
     verifier_schema_compliance: Rate,
     judge_schema_compliance: Rate,
     correct_patch_acceptance: Rate,
     bad_patch_detection: Rate,
     false_positives: usize,
     false_negatives: usize,
-    uncertainty: Rate,
-    important_findings: Rate,
-    finding_category_accuracy: Rate,
+    actual_uncertain_verdicts: Rate,
+    expected_uncertain_cases: usize,
+    bad_patch_abstentions: usize,
+    important_finding_text_probe_recall: Rate,
+    finding_category_exact_match: Rate,
+    finding_category_precision: Rate,
+    finding_category_recall: Rate,
     evidence_ref_validation_failures: usize,
     requests: usize,
     latency_ms: u64,
@@ -142,12 +158,19 @@ struct CaseResult {
     name: String,
     class: String,
     expected: Alignment,
-    actual: Alignment,
-    verdict_match: bool,
+    actual: Option<Alignment>,
+    verdict_match: Option<bool>,
+    forward_stage: StageOutcome,
+    verifier_stage: StageOutcome,
+    judge_stage: StageOutcome,
+    evidence_validation_status: StageStatus,
+    failure_category: Option<FailureCategory>,
+    execution_mode: String,
     expected_findings: usize,
     matched_findings: usize,
-    expected_finding_category: Option<String>,
-    finding_category_match: Option<bool>,
+    expected_finding_categories: Vec<String>,
+    actual_finding_categories: Option<Vec<String>>,
+    finding_category_exact_match: Option<bool>,
     evidence_ref_validation_failures: usize,
     models: Vec<String>,
     requests: usize,
@@ -159,8 +182,47 @@ struct CaseResult {
 }
 
 struct EvaluationOutput {
-    verdict: Verdict,
+    verdict: Option<Verdict>,
     calls: Vec<RunnerMetadata>,
+    forward_stage: StageOutcome,
+    verifier_stage: StageOutcome,
+    judge_stage: StageOutcome,
+    evidence_validation_status: StageStatus,
+    failure_category: Option<FailureCategory>,
+}
+
+#[derive(Debug, Clone, Copy, Default, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+enum StageStatus {
+    #[default]
+    NotAttempted,
+    Succeeded,
+    Failed,
+}
+
+#[derive(Debug, Clone, Copy, Default, Serialize)]
+struct StageOutcome {
+    attempted: bool,
+    provider_runtime_failure: bool,
+    structured_output_received: bool,
+    schema_decode_status: StageStatus,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq, PartialOrd, Ord)]
+#[serde(rename_all = "snake_case")]
+#[allow(clippy::enum_variant_names)]
+enum FailureCategory {
+    ForwardSchemaFailure,
+    VerifierSchemaFailure,
+    JudgeSchemaFailure,
+    EvidenceValidationFailure,
+    OrchestrationFailure,
+    ProviderRuntimeFailure,
+}
+
+enum StageFailure {
+    Schema,
+    Provider,
 }
 
 #[derive(Clone, Copy)]
@@ -201,6 +263,12 @@ pub async fn run(
     let report = EvalReport {
         version: 1,
         suite: suite_path.display().to_string(),
+        suite_hash: command_output("git", &["hash-object", &suite_path.display().to_string()]),
+        source_revision: command_output("git", &["rev-parse", "HEAD"]),
+        generated_at: SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map_or_else(|_| "unknown".to_owned(), |value| format!("unix-ms:{}", value.as_millis())),
+        working_tree_dirty: working_tree_dirty(),
         mode,
         profiles: reports,
         limitations: vec![
@@ -235,10 +303,10 @@ async fn run_offline(suite: &Suite) -> Result<ProfileReport> {
             [
                 serde_json::to_value(&case.intended_spec).into_diagnostic()?,
                 serde_json::to_value(&case.mock_echoed_spec).into_diagnostic()?,
-                serde_json::to_value(&case.mock_verdict).into_diagnostic()?,
+                serde_json::to_value(mock_judge_verdict(&case.mock_verdict)).into_diagnostic()?,
             ],
         );
-        let output = evaluate_case(case, &runner, None, false, 0.0, false).await?;
+        let output = evaluate_case(case, &runner, None, false, 0.0, false).await;
         cases.push(case_result(case, &output, None));
     }
     Ok(profile_report(
@@ -275,7 +343,7 @@ async fn run_api_profile(
             profile.confidence_threshold,
             true,
         )
-        .await?;
+        .await;
         cases.push(case_result(case, &output, Some(&profiles.base_url)));
     }
     Ok(profile_report(
@@ -298,25 +366,40 @@ async fn evaluate_case(
     escalate: bool,
     threshold: f64,
     strict_output: bool,
-) -> Result<EvaluationOutput> {
-    let bundle = bundle(case)?;
-    let mut calls = Vec::new();
-    let intended: IntendedSpec = stage(
+) -> EvaluationOutput {
+    let mut output = EvaluationOutput::default();
+    let Ok(bundle) = bundle(case) else {
+        return output.fail(FailureCategory::OrchestrationFailure);
+    };
+    let Ok(forward_input) = serde_json::to_value(TaskInput {
+        text: case.original_task.clone(),
+    }) else {
+        return output.fail(FailureCategory::OrchestrationFailure);
+    };
+    let intended: IntendedSpec = match stage(
         primary,
         RequestPurpose::AnalyzeForwardIntent,
-        serde_json::to_value(TaskInput {
-            text: case.original_task.clone(),
-        })
-        .into_diagnostic()?,
-        &mut calls,
+        forward_input,
+        &mut output.calls,
+        &mut output.forward_stage,
         strict_output,
     )
-    .await?;
-    let echoed: EchoedSpec = stage_with_fallback(
+    .await
+    {
+        Ok(value) => value,
+        Err(failure) => {
+            return output.fail(failure.category(FailureCategory::ForwardSchemaFailure));
+        }
+    };
+    let Ok(verifier_input) = serde_json::to_value(&bundle) else {
+        return output.fail(FailureCategory::OrchestrationFailure);
+    };
+    let echoed: EchoedSpec = match stage_with_fallback(
         primary,
         RequestPurpose::ReconstructPatchIntent,
-        serde_json::to_value(&bundle).into_diagnostic()?,
-        &mut calls,
+        verifier_input,
+        &mut output.calls,
+        &mut output.verifier_stage,
         StageOptions {
             fallback,
             escalate,
@@ -324,26 +407,76 @@ async fn evaluate_case(
         },
         |value: &EchoedSpec| value.confidence < threshold || !value.uncertainties.is_empty(),
     )
-    .await?;
-    let input = json!({
+    .await
+    {
+        Ok(value) => value,
+        Err(failure) => {
+            return output.fail(failure.category(FailureCategory::VerifierSchemaFailure));
+        }
+    };
+    let judge_input = json!({
         "intended_spec": intended,
         "echoed_spec": echoed,
         "available_evidence": bundle.patch.files,
     });
-    let verdict: Verdict = stage_with_fallback(
+    let judge: JudgeVerdict = match stage_with_fallback(
         primary,
         RequestPurpose::ReconcileIntent,
-        input,
-        &mut calls,
+        judge_input,
+        &mut output.calls,
+        &mut output.judge_stage,
         StageOptions {
             fallback,
             escalate,
             strict_output,
         },
-        |value: &Verdict| value.alignment == Alignment::Uncertain || value.confidence < threshold,
+        |value: &JudgeVerdict| {
+            value.alignment == Alignment::Uncertain || value.confidence < threshold
+        },
     )
-    .await?;
-    Ok(EvaluationOutput { verdict, calls })
+    .await
+    {
+        Ok(value) => value,
+        Err(failure) => return output.fail(failure.category(FailureCategory::JudgeSchemaFailure)),
+    };
+    if let Ok(verdict) = flect_app::materialize_judge_verdict(judge, &bundle) {
+        output.verdict = Some(verdict);
+        output.evidence_validation_status = StageStatus::Succeeded;
+        output
+    } else {
+        output.evidence_validation_status = StageStatus::Failed;
+        output.fail(FailureCategory::EvidenceValidationFailure)
+    }
+}
+
+impl Default for EvaluationOutput {
+    fn default() -> Self {
+        Self {
+            verdict: None,
+            calls: Vec::new(),
+            forward_stage: StageOutcome::default(),
+            verifier_stage: StageOutcome::default(),
+            judge_stage: StageOutcome::default(),
+            evidence_validation_status: StageStatus::NotAttempted,
+            failure_category: None,
+        }
+    }
+}
+
+impl EvaluationOutput {
+    fn fail(mut self, category: FailureCategory) -> Self {
+        self.failure_category = Some(category);
+        self
+    }
+}
+
+impl StageFailure {
+    fn category(self, schema: FailureCategory) -> FailureCategory {
+        match self {
+            Self::Schema => schema,
+            Self::Provider => FailureCategory::ProviderRuntimeFailure,
+        }
+    }
 }
 
 async fn stage<T: DeserializeOwned + JsonSchema>(
@@ -351,16 +484,15 @@ async fn stage<T: DeserializeOwned + JsonSchema>(
     purpose: RequestPurpose,
     input: Value,
     calls: &mut Vec<RunnerMetadata>,
+    outcome: &mut StageOutcome,
     strict_output: bool,
-) -> Result<T> {
-    let output = runner
-        .generate_structured(
-            &AgentRequest { purpose, input },
-            &output_schema::<T>(strict_output)?,
-        )
-        .await
-        .map_err(|error| miette!("evaluation runner failed: {error}"))?;
-    decode(output, calls)
+) -> std::result::Result<T, StageFailure> {
+    let schema = output_schema::<T>(strict_output).map_err(|_| StageFailure::Schema)?;
+    outcome.attempted = true;
+    let result = runner
+        .generate_structured(&AgentRequest { purpose, input }, &schema)
+        .await;
+    record_runner_result(result, calls, outcome)
 }
 
 async fn stage_with_fallback<T, F>(
@@ -368,52 +500,90 @@ async fn stage_with_fallback<T, F>(
     purpose: RequestPurpose,
     input: Value,
     calls: &mut Vec<RunnerMetadata>,
+    outcome: &mut StageOutcome,
     options: StageOptions<'_>,
     should_escalate: F,
-) -> Result<T>
+) -> std::result::Result<T, StageFailure>
 where
     T: DeserializeOwned + JsonSchema,
     F: Fn(&T) -> bool,
 {
-    let schema = output_schema::<T>(options.strict_output)?;
+    let schema = output_schema::<T>(options.strict_output).map_err(|_| StageFailure::Schema)?;
     let request = AgentRequest { purpose, input };
-    let primary_output = primary.generate_structured(&request, &schema).await;
-    match primary_output {
-        Ok(output) => {
-            let value = decode(output, calls)?;
-            if options.escalate && should_escalate(&value) {
-                if let Some(fallback) = options.fallback {
-                    return decode(
-                        fallback
-                            .generate_structured(&request, &schema)
-                            .await
-                            .map_err(|error| miette!("evaluation fallback failed: {error}"))?,
-                        calls,
-                    );
-                }
-            }
-            Ok(value)
+    outcome.attempted = true;
+    let primary_result = primary.generate_structured(&request, &schema).await;
+    let primary_value = record_runner_result(primary_result, calls, outcome);
+    match primary_value {
+        Ok(value) if options.escalate && should_escalate(&value) && options.fallback.is_some() => {
+            *outcome = StageOutcome {
+                attempted: true,
+                ..StageOutcome::default()
+            };
+            record_runner_result(
+                options
+                    .fallback
+                    .expect("checked above")
+                    .generate_structured(&request, &schema)
+                    .await,
+                calls,
+                outcome,
+            )
         }
-        Err(primary_error) if options.escalate && options.fallback.is_some() => decode(
-            options
-                .fallback
-                .expect("checked above")
-                .generate_structured(&request, &schema)
-                .await
-                .map_err(|error| {
-                    miette!("primary failed ({primary_error}); evaluation fallback failed: {error}")
-                })?,
-            calls,
-        ),
-        Err(error) => Err(miette!("evaluation runner failed: {error}")),
+        Ok(value) => Ok(value),
+        Err(_) if options.escalate && options.fallback.is_some() => {
+            *outcome = StageOutcome {
+                attempted: true,
+                ..StageOutcome::default()
+            };
+            record_runner_result(
+                options
+                    .fallback
+                    .expect("checked above")
+                    .generate_structured(&request, &schema)
+                    .await,
+                calls,
+                outcome,
+            )
+        }
+        Err(failure) => Err(failure),
     }
 }
 
-fn decode<T: DeserializeOwned>(output: RunnerOutput, calls: &mut Vec<RunnerMetadata>) -> Result<T> {
-    calls.push(output.metadata);
-    serde_json::from_value(output.value)
-        .into_diagnostic()
-        .wrap_err("evaluation output did not match its typed schema")
+fn record_runner_result<T: DeserializeOwned>(
+    result: std::result::Result<RunnerOutput, RunnerError>,
+    calls: &mut Vec<RunnerMetadata>,
+    outcome: &mut StageOutcome,
+) -> std::result::Result<T, StageFailure> {
+    match result {
+        Ok(output) => {
+            outcome.structured_output_received = true;
+            calls.push(output.metadata);
+            if let Ok(value) = serde_json::from_value(output.value) {
+                outcome.schema_decode_status = StageStatus::Succeeded;
+                Ok(value)
+            } else {
+                outcome.schema_decode_status = StageStatus::Failed;
+                Err(StageFailure::Schema)
+            }
+        }
+        Err(error) => {
+            let failure = classify_runner_error(&error);
+            match failure {
+                StageFailure::Schema => outcome.schema_decode_status = StageStatus::Failed,
+                StageFailure::Provider => outcome.provider_runtime_failure = true,
+            }
+            Err(failure)
+        }
+    }
+}
+
+fn classify_runner_error(error: &RunnerError) -> StageFailure {
+    match error {
+        RunnerError::InvalidJson(_)
+        | RunnerError::SchemaValidation(_)
+        | RunnerError::MissingOutput => StageFailure::Schema,
+        _ => StageFailure::Provider,
+    }
 }
 
 fn bundle(case: &EvalCase) -> Result<BlindBundle> {
@@ -466,7 +636,11 @@ fn case_result(
     output: &EvaluationOutput,
     pricing_base_url: Option<&str>,
 ) -> CaseResult {
-    let finding_text = finding_text(&output.verdict);
+    let finding_text = output
+        .verdict
+        .as_ref()
+        .map(finding_text)
+        .unwrap_or_default();
     let matched_findings = case
         .expected
         .important_findings
@@ -479,30 +653,48 @@ fn case_result(
         name: case.name.clone(),
         class: case.class.clone(),
         expected: case.expected.verdict,
-        actual: output.verdict.alignment,
-        verdict_match: output.verdict.alignment == case.expected.verdict,
+        actual: output.verdict.as_ref().map(|verdict| verdict.alignment),
+        verdict_match: output
+            .verdict
+            .as_ref()
+            .map(|verdict| verdict.alignment == case.expected.verdict),
+        forward_stage: output.forward_stage,
+        verifier_stage: output.verifier_stage,
+        judge_stage: output.judge_stage,
+        evidence_validation_status: output.evidence_validation_status,
+        failure_category: output.failure_category,
+        execution_mode: if pricing_base_url.is_some() {
+            "http_responses_api"
+        } else {
+            "deterministic_fixture"
+        }
+        .to_owned(),
         expected_findings: case.expected.important_findings.len(),
         matched_findings,
-        expected_finding_category: case.expected.finding_category.clone(),
-        finding_category_match: case
-            .expected
-            .finding_category
-            .as_ref()
-            .map(|_| matched_findings == case.expected.important_findings.len()),
-        evidence_ref_validation_failures: output
+        expected_finding_categories: case.expected.finding_categories.clone(),
+        actual_finding_categories: output.verdict.as_ref().map(verdict_categories),
+        finding_category_exact_match: output
             .verdict
-            .evidence
-            .iter()
-            .filter(|evidence| {
-                evidence.file.as_ref().is_some_and(|evidence_path| {
-                    !case
-                        .candidate_patch
-                        .files
-                        .iter()
-                        .any(|file| &file.path == evidence_path)
-                })
-            })
-            .count(),
+            .as_ref()
+            .map(|verdict| verdict_categories(verdict) == case.expected.finding_categories),
+        evidence_ref_validation_failures: output.verdict.as_ref().map_or(
+            usize::from(output.evidence_validation_status == StageStatus::Failed),
+            |verdict| {
+                verdict
+                    .evidence
+                    .iter()
+                    .filter(|evidence| {
+                        evidence.file.as_ref().is_some_and(|evidence_path| {
+                            !case
+                                .candidate_patch
+                                .files
+                                .iter()
+                                .any(|file| &file.path == evidence_path)
+                        })
+                    })
+                    .count()
+            },
+        ),
         models: output.calls.iter().map(|call| call.model.clone()).collect(),
         requests: output.calls.len(),
         latency_ms: usage.latency_ms,
@@ -515,31 +707,49 @@ fn case_result(
 
 #[allow(clippy::too_many_lines)]
 fn profile_report(profile: ProfileSummary, cases: Vec<CaseResult>) -> ProfileReport {
+    let completed = cases.iter().filter(|case| case.actual.is_some()).count();
     let correct = cases
         .iter()
         .filter(|case| case.expected == Alignment::Same)
         .count();
     let accepted = cases
         .iter()
-        .filter(|case| case.expected == Alignment::Same && case.actual == Alignment::Same)
+        .filter(|case| case.expected == Alignment::Same && case.actual == Some(Alignment::Same))
         .count();
-    let bad = cases.len() - correct;
+    let bad = cases
+        .iter()
+        .filter(|case| matches!(case.expected, Alignment::Partial | Alignment::Different))
+        .count();
     let detected = cases
         .iter()
         .filter(|case| {
-            case.expected != Alignment::Same
-                && matches!(case.actual, Alignment::Partial | Alignment::Different)
+            matches!(case.expected, Alignment::Partial | Alignment::Different)
+                && matches!(case.actual, Some(Alignment::Partial | Alignment::Different))
         })
         .count();
     let uncertain = cases
         .iter()
-        .filter(|case| case.actual == Alignment::Uncertain)
+        .filter(|case| case.actual == Some(Alignment::Uncertain))
+        .count();
+    let expected_uncertain = cases
+        .iter()
+        .filter(|case| case.expected == Alignment::Uncertain)
+        .count();
+    let bad_patch_abstentions = cases
+        .iter()
+        .filter(|case| {
+            matches!(case.expected, Alignment::Partial | Alignment::Different)
+                && case.actual == Some(Alignment::Uncertain)
+        })
         .count();
     let expected_findings = cases.iter().map(|case| case.expected_findings).sum();
     let matched_findings = cases.iter().map(|case| case.matched_findings).sum();
     let calls = cases.iter().map(|case| case.requests).sum();
     let latency = cases.iter().map(|case| case.latency_ms).sum();
-    let exact = cases.iter().filter(|case| case.verdict_match).count();
+    let exact = cases
+        .iter()
+        .filter(|case| case.verdict_match == Some(true))
+        .count();
     let mut per_class_counts = BTreeMap::<String, (usize, usize)>::new();
     let mut confusion_matrix = BTreeMap::<String, BTreeMap<String, usize>>::new();
     for label in ["SAME", "PARTIAL", "DIFFERENT", "UNCERTAIN"] {
@@ -556,11 +766,12 @@ fn profile_report(profile: ProfileSummary, cases: Vec<CaseResult>) -> ProfileRep
     for case in &cases {
         let count = per_class_counts.entry(case.class.clone()).or_default();
         count.1 += 1;
-        count.0 += usize::from(case.verdict_match);
+        count.0 += usize::from(case.verdict_match == Some(true));
+        let Some(actual) = case.actual else { continue };
         *confusion_matrix
             .get_mut(alignment_name(case.expected))
             .expect("known alignment")
-            .get_mut(alignment_name(case.actual))
+            .get_mut(alignment_name(actual))
             .expect("known alignment") += 1;
     }
     let per_class_accuracy = per_class_counts
@@ -569,12 +780,36 @@ fn profile_report(profile: ProfileSummary, cases: Vec<CaseResult>) -> ProfileRep
         .collect();
     let category_cases = cases
         .iter()
-        .filter(|case| case.expected_finding_category.is_some())
+        .filter(|case| case.actual_finding_categories.is_some())
         .count();
     let category_matches = cases
         .iter()
-        .filter(|case| case.finding_category_match == Some(true))
+        .filter(|case| case.finding_category_exact_match == Some(true))
         .count();
+    let category_true_positives = cases
+        .iter()
+        .filter_map(|case| {
+            case.actual_finding_categories
+                .as_ref()
+                .map(|actual| (case, actual))
+        })
+        .map(|(case, actual)| {
+            actual
+                .iter()
+                .filter(|category| case.expected_finding_categories.contains(category))
+                .count()
+        })
+        .sum();
+    let category_predictions = cases
+        .iter()
+        .filter_map(|case| case.actual_finding_categories.as_ref())
+        .map(Vec::len)
+        .sum();
+    let category_expected = cases
+        .iter()
+        .filter(|case| case.actual_finding_categories.is_some())
+        .map(|case| case.expected_finding_categories.len())
+        .sum();
     let evidence_failures = cases
         .iter()
         .map(|case| case.evidence_ref_validation_failures)
@@ -589,23 +824,34 @@ fn profile_report(profile: ProfileSummary, cases: Vec<CaseResult>) -> ProfileRep
     let metrics = Metrics {
         cases: cases.len(),
         cases_attempted: cases.len(),
-        cases_persisted: cases.len(),
+        cases_completed: completed,
+        cases_failed: cases.len() - completed,
+        failure_counts: failure_counts(&cases),
         exact_verdicts: exact,
-        verdict_accuracy: rate(exact, cases.len()),
+        overall_verdict_accuracy: rate(exact, cases.len()),
+        completed_verdict_accuracy: rate(exact, completed),
         per_class_accuracy,
         confusion_matrix,
-        verifier_schema_compliance: rate(cases.len() * 2, cases.len() * 2),
-        judge_schema_compliance: rate(cases.len(), cases.len()),
+        forward_schema_compliance: stage_rate(&cases, |case| case.forward_stage),
+        verifier_schema_compliance: stage_rate(&cases, |case| case.verifier_stage),
+        judge_schema_compliance: stage_rate(&cases, |case| case.judge_stage),
         correct_patch_acceptance: rate(accepted, correct),
         bad_patch_detection: rate(detected, bad),
         false_positives: correct - accepted,
         false_negatives: cases
             .iter()
-            .filter(|case| case.expected != Alignment::Same && case.actual == Alignment::Same)
+            .filter(|case| {
+                matches!(case.expected, Alignment::Partial | Alignment::Different)
+                    && case.actual == Some(Alignment::Same)
+            })
             .count(),
-        uncertainty: rate(uncertain, cases.len()),
-        important_findings: rate(matched_findings, expected_findings),
-        finding_category_accuracy: rate(category_matches, category_cases),
+        actual_uncertain_verdicts: rate(uncertain, cases.len()),
+        expected_uncertain_cases: expected_uncertain,
+        bad_patch_abstentions,
+        important_finding_text_probe_recall: rate(matched_findings, expected_findings),
+        finding_category_exact_match: rate(category_matches, category_cases),
+        finding_category_precision: rate(category_true_positives, category_predictions),
+        finding_category_recall: rate(category_true_positives, category_expected),
         evidence_ref_validation_failures: evidence_failures,
         requests: calls,
         latency_ms: latency,
@@ -710,6 +956,92 @@ fn finding_text(verdict: &Verdict) -> String {
         .to_ascii_lowercase()
 }
 
+fn verdict_categories(verdict: &Verdict) -> Vec<String> {
+    [
+        (
+            !verdict.missing_requirements.is_empty(),
+            "missing_requirement",
+        ),
+        (
+            !verdict.unrequested_changes.is_empty(),
+            "unrequested_change",
+        ),
+        (
+            !verdict.violated_constraints.is_empty(),
+            "violated_constraint",
+        ),
+        (
+            !verdict.potential_side_effects.is_empty(),
+            "potential_side_effect",
+        ),
+    ]
+    .into_iter()
+    .filter(|(present, _)| *present)
+    .map(|(_, category)| category.to_owned())
+    .collect()
+}
+
+fn mock_judge_verdict(verdict: &Verdict) -> JudgeVerdict {
+    let findings = [
+        (
+            FindingCategory::MissingRequirements,
+            &verdict.missing_requirements,
+        ),
+        (
+            FindingCategory::UnrequestedChanges,
+            &verdict.unrequested_changes,
+        ),
+        (
+            FindingCategory::ViolatedConstraints,
+            &verdict.violated_constraints,
+        ),
+        (
+            FindingCategory::PotentialSideEffects,
+            &verdict.potential_side_effects,
+        ),
+    ]
+    .into_iter()
+    .flat_map(|(kind, texts)| {
+        texts.iter().map(move |text| JudgeFinding {
+            kind,
+            text: text.clone(),
+            evidence_ref: None,
+        })
+    })
+    .collect();
+    JudgeVerdict {
+        alignment: verdict.alignment,
+        findings,
+        confidence: verdict.confidence,
+    }
+}
+
+fn stage_rate(cases: &[CaseResult], outcome: impl Fn(&CaseResult) -> StageOutcome) -> Rate {
+    let attempted = cases
+        .iter()
+        .map(&outcome)
+        .filter(|stage| stage.attempted && !stage.provider_runtime_failure)
+        .count();
+    let succeeded = cases
+        .iter()
+        .map(outcome)
+        .filter(|stage| stage.schema_decode_status == StageStatus::Succeeded)
+        .count();
+    rate(succeeded, attempted)
+}
+
+fn failure_counts(cases: &[CaseResult]) -> BTreeMap<String, usize> {
+    let mut counts = BTreeMap::new();
+    for failure in cases.iter().filter_map(|case| case.failure_category) {
+        let key = serde_json::to_value(failure)
+            .ok()
+            .and_then(|value| value.as_str().map(str::to_owned))
+            .unwrap_or_else(|| "orchestration_failure".to_owned());
+        *counts.entry(key).or_insert(0) += 1;
+    }
+    counts
+}
+
 fn strict_schema<T: JsonSchema>() -> Result<Value> {
     let mut schema = serde_json::to_value(schema_for!(T)).into_diagnostic()?;
     make_objects_strict(&mut schema);
@@ -779,9 +1111,17 @@ fn validate_suite(suite: &Suite) -> Result<()> {
         {
             return Err(miette!("evaluation case `{}` is incomplete", case.name));
         }
-        if case.expected.important_findings.is_empty() != case.expected.finding_category.is_none() {
+        if case.expected.finding_categories.iter().any(|category| {
+            ![
+                "missing_requirement",
+                "unrequested_change",
+                "violated_constraint",
+                "potential_side_effect",
+            ]
+            .contains(&category.as_str())
+        }) {
             return Err(miette!(
-                "evaluation case `{}` has inconsistent finding ground truth",
+                "evaluation case `{}` has an invalid finding category",
                 case.name
             ));
         }
@@ -797,14 +1137,14 @@ fn validate_suite(suite: &Suite) -> Result<()> {
         .cases
         .iter()
         .filter(|case| case.subset == "canonical-5")
-        .map(|case| (case.class.as_str(), case.expected.verdict))
+        .map(|case| (case.id.as_str(), case.class.as_str(), case.expected.verdict))
         .collect::<Vec<_>>();
     let expected = vec![
-        ("correct_patch", Alignment::Same),
-        ("partial_implementation", Alignment::Partial),
-        ("scope_creep", Alignment::Partial),
-        ("constraint_violation", Alignment::Partial),
-        ("wrong_component", Alignment::Different),
+        ("canonical-01", "correct_patch", Alignment::Same),
+        ("canonical-02", "partial_implementation", Alignment::Partial),
+        ("canonical-03", "constraint_violation", Alignment::Partial),
+        ("canonical-04", "scope_creep", Alignment::Partial),
+        ("canonical-05", "wrong_component", Alignment::Different),
     ];
     if canonical != expected {
         return Err(miette!("canonical-5 labels or ordering drifted"));
@@ -846,6 +1186,26 @@ fn read_toml<T: DeserializeOwned>(path: &Path) -> Result<T> {
         .wrap_err_with(|| format!("invalid TOML in {}", path.display()))
 }
 
+fn command_output(program: &str, args: &[&str]) -> Option<String> {
+    Command::new(program)
+        .args(args)
+        .output()
+        .ok()
+        .filter(|output| output.status.success())
+        .and_then(|output| String::from_utf8(output.stdout).ok())
+        .map(|value| value.trim().to_owned())
+        .filter(|value| !value.is_empty())
+}
+
+fn working_tree_dirty() -> Option<bool> {
+    Command::new("git")
+        .args(["status", "--porcelain", "--untracked-files=normal"])
+        .output()
+        .ok()
+        .filter(|output| output.status.success())
+        .map(|output| !output.stdout.is_empty())
+}
+
 fn print_summary(report: &EvalReport) {
     println!("Flect evaluation\n");
     println!("Mode     {}", report.mode);
@@ -854,8 +1214,12 @@ fn print_summary(report: &EvalReport) {
         let metrics = &profile.metrics;
         println!("\n{}", profile.profile.name);
         println!(
-            "  Exact verdicts       {}/{}",
-            metrics.exact_verdicts, metrics.cases
+            "  Overall accuracy     {}",
+            display_rate(&metrics.overall_verdict_accuracy)
+        );
+        println!(
+            "  Completed accuracy   {}",
+            display_rate(&metrics.completed_verdict_accuracy)
         );
         println!(
             "  Correct acceptance   {}",
@@ -867,11 +1231,11 @@ fn print_summary(report: &EvalReport) {
         );
         println!(
             "  Uncertainty          {}",
-            display_rate(&metrics.uncertainty)
+            display_rate(&metrics.actual_uncertain_verdicts)
         );
         println!(
             "  Findings             {}",
-            display_rate(&metrics.important_findings)
+            display_rate(&metrics.important_finding_text_probe_recall)
         );
         println!("  Requests             {}", metrics.requests);
         println!("  Latency              {} ms", metrics.latency_ms);
@@ -896,4 +1260,84 @@ fn display_rate(rate: &Rate) -> String {
             )
         },
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn first_case() -> EvalCase {
+        let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+        let suite: Suite = read_json(&root.join("fixtures/evaluation/cases.json")).unwrap();
+        suite.cases.into_iter().next().unwrap()
+    }
+
+    #[tokio::test]
+    async fn schema_failure_is_a_typed_case_result() {
+        let case = first_case();
+        let runner = MockRunner::named("malformed", [json!({"unexpected": true})]);
+        let output = evaluate_case(&case, &runner, None, false, 0.0, false).await;
+        assert_eq!(
+            output.failure_category,
+            Some(FailureCategory::ForwardSchemaFailure)
+        );
+        assert!(!output.verifier_stage.attempted);
+        assert_eq!(
+            output.forward_stage.schema_decode_status,
+            StageStatus::Failed
+        );
+        assert!(!output.forward_stage.provider_runtime_failure);
+        assert!(output.verdict.is_none());
+    }
+
+    #[tokio::test]
+    async fn compact_judge_evidence_failure_is_closed() {
+        let case = first_case();
+        let judge = JudgeVerdict {
+            alignment: Alignment::Partial,
+            findings: vec![JudgeFinding {
+                kind: FindingCategory::MissingRequirements,
+                text: "missing behavior".to_owned(),
+                evidence_ref: Some("hunk/999".to_owned()),
+            }],
+            confidence: 0.8,
+        };
+        let runner = MockRunner::named(
+            "invalid-evidence",
+            [
+                serde_json::to_value(&case.intended_spec).unwrap(),
+                serde_json::to_value(&case.mock_echoed_spec).unwrap(),
+                serde_json::to_value(judge).unwrap(),
+            ],
+        );
+        let output = evaluate_case(&case, &runner, None, false, 0.0, false).await;
+        assert_eq!(
+            output.failure_category,
+            Some(FailureCategory::EvidenceValidationFailure)
+        );
+        assert_eq!(
+            output.judge_stage.schema_decode_status,
+            StageStatus::Succeeded
+        );
+        assert_eq!(output.evidence_validation_status, StageStatus::Failed);
+        assert!(output.verdict.is_none());
+    }
+
+    #[tokio::test]
+    async fn metric_denominators_are_fail_closed_and_exclude_expected_uncertain_from_bad() {
+        let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+        let suite: Suite = read_json(&root.join("fixtures/evaluation/cases.json")).unwrap();
+        let mut report = run_offline(&suite).await.unwrap();
+        assert_eq!(report.metrics.bad_patch_detection.denominator, 31);
+        assert_eq!(report.metrics.expected_uncertain_cases, 3);
+        assert_eq!(report.metrics.bad_patch_abstentions, 0);
+
+        report.cases[0].actual = None;
+        report.cases[0].verdict_match = None;
+        let report = profile_report(report.profile, report.cases);
+        assert_eq!(report.metrics.overall_verdict_accuracy.denominator, 40);
+        assert_eq!(report.metrics.overall_verdict_accuracy.numerator, 39);
+        assert_eq!(report.metrics.completed_verdict_accuracy.denominator, 39);
+        assert_eq!(report.metrics.completed_verdict_accuracy.numerator, 39);
+    }
 }

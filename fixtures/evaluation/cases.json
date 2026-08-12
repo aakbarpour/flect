@@ -65,8 +65,8 @@
       "expected": {
         "verdict": "SAME",
         "important_findings": [],
-        "finding_category": null,
-        "rationale": "The patch is expected to be SAME because expired tokens are rejected."
+        "rationale": "The patch is expected to be SAME because expired tokens are rejected.",
+        "expected_finding_categories": []
       },
       "id": "canonical-01",
       "subset": "canonical-5",
@@ -148,10 +148,105 @@
         "important_findings": [
           "rate limit"
         ],
-        "finding_category": "partial_implementation",
-        "rationale": "The patch is expected to be PARTIAL because requests are validated."
+        "rationale": "The patch is expected to be PARTIAL because requests are validated.",
+        "expected_finding_categories": [
+          "missing_requirement"
+        ]
       },
       "id": "canonical-02",
+      "subset": "canonical-5",
+      "base_state": "Repository files before applying the candidate patch.",
+      "change": "Candidate patch recorded in candidate_patch."
+    },
+    {
+      "name": "constraint violation",
+      "class": "constraint_violation",
+      "base_files": [
+        {
+          "path": "src/lib.rs",
+          "content": "pub fn parse(v: &str) -> Item { old_parse(v) }\n"
+        }
+      ],
+      "original_task": "Speed up parsing without changing the public API",
+      "candidate_patch": {
+        "base_revision": "fixture",
+        "files": [
+          {
+            "path": "src/lib.rs",
+            "status": "modified",
+            "patch": "@@ -1 +1 @@\n-pub fn parse(v: &str) -> Item { old_parse(v) }\n+pub fn parse(v: Bytes) -> Item { fast_parse(v) }",
+            "insertions": 1,
+            "deletions": 1,
+            "binary": false
+          }
+        ],
+        "renames": 0,
+        "insertions": 1,
+        "deletions": 1,
+        "binary_files": [],
+        "untracked_files": []
+      },
+      "intended_spec": {
+        "objective": "Speed up parsing",
+        "requirements": [
+          "Improve parser performance"
+        ],
+        "constraints": [
+          "Do not change the public API"
+        ],
+        "expected_scope": [
+          "src/lib.rs"
+        ]
+      },
+      "mock_echoed_spec": {
+        "apparent_objective": "Use a faster parser",
+        "behavior_after": [
+          "Parsing uses bytes"
+        ],
+        "affected_scope": [
+          "src/lib.rs"
+        ],
+        "side_effects": [
+          "The public input type changes"
+        ],
+        "confidence": 0.95
+      },
+      "mock_verdict": {
+        "alignment": "PARTIAL",
+        "agreements": [
+          "Parser implementation changes"
+        ],
+        "missing_requirements": [],
+        "unrequested_changes": [],
+        "violated_constraints": [
+          "Changes the public API from string to bytes"
+        ],
+        "potential_side_effects": [
+          "Callers must migrate"
+        ],
+        "uncertainties": [],
+        "evidence": [
+          {
+            "file": "src/lib.rs",
+            "description": "The public API parameter type changed",
+            "confidence": 0.95
+          }
+        ],
+        "confidence": 0.95,
+        "recommended_action": "REVISE_PATCH"
+      },
+      "expected": {
+        "verdict": "PARTIAL",
+        "important_findings": [
+          "public api"
+        ],
+        "rationale": "The patch is expected to be PARTIAL because parser implementation changes.",
+        "expected_finding_categories": [
+          "violated_constraint",
+          "potential_side_effect"
+        ]
+      },
+      "id": "canonical-03",
       "subset": "canonical-5",
       "base_state": "Repository files before applying the candidate patch.",
       "change": "Candidate patch recorded in candidate_patch."
@@ -239,98 +334,11 @@
         "important_findings": [
           "logging"
         ],
-        "finding_category": "scope_creep",
-        "rationale": "The patch is expected to be PARTIAL because cached values are returned."
-      },
-      "id": "canonical-03",
-      "subset": "canonical-5",
-      "base_state": "Repository files before applying the candidate patch.",
-      "change": "Candidate patch recorded in candidate_patch."
-    },
-    {
-      "name": "constraint violation",
-      "class": "constraint_violation",
-      "base_files": [
-        {
-          "path": "src/lib.rs",
-          "content": "pub fn parse(v: &str) -> Item { old_parse(v) }\n"
-        }
-      ],
-      "original_task": "Speed up parsing without changing the public API",
-      "candidate_patch": {
-        "base_revision": "fixture",
-        "files": [
-          {
-            "path": "src/lib.rs",
-            "status": "modified",
-            "patch": "@@ -1 +1 @@\n-pub fn parse(v: &str) -> Item { old_parse(v) }\n+pub fn parse(v: Bytes) -> Item { fast_parse(v) }",
-            "insertions": 1,
-            "deletions": 1,
-            "binary": false
-          }
-        ],
-        "renames": 0,
-        "insertions": 1,
-        "deletions": 1,
-        "binary_files": [],
-        "untracked_files": []
-      },
-      "intended_spec": {
-        "objective": "Speed up parsing",
-        "requirements": [
-          "Improve parser performance"
-        ],
-        "constraints": [
-          "Do not change the public API"
-        ],
-        "expected_scope": [
-          "src/lib.rs"
+        "rationale": "The patch is expected to be PARTIAL because cached values are returned.",
+        "expected_finding_categories": [
+          "unrequested_change",
+          "potential_side_effect"
         ]
-      },
-      "mock_echoed_spec": {
-        "apparent_objective": "Use a faster parser",
-        "behavior_after": [
-          "Parsing uses bytes"
-        ],
-        "affected_scope": [
-          "src/lib.rs"
-        ],
-        "side_effects": [
-          "The public input type changes"
-        ],
-        "confidence": 0.95
-      },
-      "mock_verdict": {
-        "alignment": "PARTIAL",
-        "agreements": [
-          "Parser implementation changes"
-        ],
-        "missing_requirements": [],
-        "unrequested_changes": [],
-        "violated_constraints": [
-          "Changes the public API from string to bytes"
-        ],
-        "potential_side_effects": [
-          "Callers must migrate"
-        ],
-        "uncertainties": [],
-        "evidence": [
-          {
-            "file": "src/lib.rs",
-            "description": "The public API parameter type changed",
-            "confidence": 0.95
-          }
-        ],
-        "confidence": 0.95,
-        "recommended_action": "REVISE_PATCH"
-      },
-      "expected": {
-        "verdict": "PARTIAL",
-        "important_findings": [
-          "public api"
-        ],
-        "finding_category": "constraint_violation",
-        "rationale": "The patch is expected to be PARTIAL because parser implementation changes."
       },
       "id": "canonical-04",
       "subset": "canonical-5",
@@ -338,22 +346,26 @@
       "change": "Candidate patch recorded in candidate_patch."
     },
     {
-      "name": "semantic workaround",
-      "class": "semantic_workaround",
+      "name": "wrong component modified",
+      "class": "wrong_component",
       "base_files": [
         {
-          "path": "src/search.rs",
-          "content": "fn search(q: &str) -> Vec<Row> { db_search(q) }\n"
+          "path": "src/auth.rs",
+          "content": "fn authenticate() { handler(); }\n"
+        },
+        {
+          "path": "src/ui.rs",
+          "content": "fn label() -> &'static str { \"Login\" }\n"
         }
       ],
-      "original_task": "Make repeated searches faster",
+      "original_task": "Reject disabled accounts in the auth handler",
       "candidate_patch": {
         "base_revision": "fixture",
         "files": [
           {
-            "path": "src/search.rs",
+            "path": "src/ui.rs",
             "status": "modified",
-            "patch": "@@ -1 +1 @@\n-fn search(q: &str) -> Vec<Row> { db_search(q) }\n+fn search(q: &str) -> Vec<Row> { ALL_ROWS.clone().filter(q) }",
+            "patch": "@@ -1 +1 @@\n-fn label() -> &'static str { \"Login\" }\n+fn label() -> &'static str { \"Account login\" }",
             "insertions": 1,
             "deletions": 1,
             "binary": false
@@ -366,64 +378,59 @@
         "untracked_files": []
       },
       "intended_spec": {
-        "objective": "Make repeated searches faster",
+        "objective": "Reject disabled accounts",
         "requirements": [
-          "Reduce repeated search latency"
-        ],
-        "constraints": [
-          "Do not load the whole dataset into memory"
+          "Check disabled state in the auth handler"
         ],
         "expected_scope": [
-          "src/search.rs"
+          "src/auth.rs"
         ]
       },
       "mock_echoed_spec": {
-        "apparent_objective": "Search an in-memory copy",
+        "apparent_objective": "Change the login label",
         "behavior_after": [
-          "All rows are cloned then filtered"
+          "The UI label changes"
         ],
         "affected_scope": [
-          "src/search.rs"
+          "src/ui.rs"
         ],
-        "side_effects": [
-          "Memory grows with the dataset"
-        ],
-        "confidence": 0.9
+        "confidence": 0.98
       },
       "mock_verdict": {
-        "alignment": "PARTIAL",
-        "agreements": [
-          "Avoids repeated database calls"
+        "alignment": "DIFFERENT",
+        "agreements": [],
+        "missing_requirements": [
+          "The auth handler does not check disabled accounts"
         ],
-        "missing_requirements": [],
-        "unrequested_changes": [],
-        "violated_constraints": [
-          "Loads the dataset into memory"
+        "unrequested_changes": [
+          "Changes a UI label"
         ],
-        "potential_side_effects": [
-          "Unbounded memory growth"
-        ],
+        "violated_constraints": [],
+        "potential_side_effects": [],
         "uncertainties": [],
         "evidence": [
           {
-            "file": "src/search.rs",
-            "description": "The workaround clones all rows into memory",
-            "confidence": 0.9
+            "file": "src/ui.rs",
+            "description": "Only the UI label changed; the auth handler is untouched",
+            "confidence": 0.98
           }
         ],
-        "confidence": 0.9,
-        "recommended_action": "REVISE_PATCH"
+        "confidence": 0.98,
+        "recommended_action": "REVISIT_REASONING"
       },
       "expected": {
-        "verdict": "PARTIAL",
+        "verdict": "DIFFERENT",
         "important_findings": [
-          "memory"
+          "auth handler"
         ],
-        "finding_category": "semantic_workaround",
-        "rationale": "The patch is expected to be PARTIAL because avoids repeated database calls."
+        "rationale": "The patch is expected to be DIFFERENT because The auth handler does not check disabled accounts.",
+        "expected_finding_categories": [
+          "missing_requirement",
+          "unrequested_change"
+        ]
       },
       "id": "canonical-05",
-      "subset": "benchmark-v1",
+      "subset": "canonical-5",
       "base_state": "Repository files before applying the candidate patch.",
       "change": "Candidate patch recorded in candidate_patch."
     },
@@ -511,8 +518,12 @@
         "important_findings": [
           "all origins"
         ],
-        "finding_category": "broadened_behavior",
-        "rationale": "The patch is expected to be PARTIAL because staging becomes allowed."
+        "rationale": "The patch is expected to be PARTIAL because staging becomes allowed.",
+        "expected_finding_categories": [
+          "unrequested_change",
+          "violated_constraint",
+          "potential_side_effect"
+        ]
       },
       "id": "legacy-06",
       "subset": "benchmark-v1",
@@ -603,8 +614,12 @@
         "important_findings": [
           "legacy parser"
         ],
-        "finding_category": "unrelated_removal",
-        "rationale": "The patch is expected to be DIFFERENT because error text changes."
+        "rationale": "The patch is expected to be DIFFERENT because error text changes.",
+        "expected_finding_categories": [
+          "unrequested_change",
+          "violated_constraint",
+          "potential_side_effect"
+        ]
       },
       "id": "legacy-07",
       "subset": "benchmark-v1",
@@ -690,8 +705,11 @@
         "important_findings": [
           "empty input"
         ],
-        "finding_category": "missing_edge_case",
-        "rationale": "The patch is expected to be PARTIAL because names are trimmed and lowercased."
+        "rationale": "The patch is expected to be PARTIAL because names are trimmed and lowercased.",
+        "expected_finding_categories": [
+          "missing_requirement",
+          "potential_side_effect"
+        ]
       },
       "id": "legacy-08",
       "subset": "benchmark-v1",
@@ -781,8 +799,11 @@
         "important_findings": [
           "rename"
         ],
-        "finding_category": "unnecessary_refactor",
-        "rationale": "The patch is expected to be PARTIAL because the value becomes 60."
+        "rationale": "The patch is expected to be PARTIAL because the value becomes 60.",
+        "expected_finding_categories": [
+          "unrequested_change",
+          "potential_side_effect"
+        ]
       },
       "id": "legacy-09",
       "subset": "benchmark-v1",
@@ -790,26 +811,22 @@
       "change": "Candidate patch recorded in candidate_patch."
     },
     {
-      "name": "wrong component modified",
-      "class": "wrong_component",
+      "name": "semantic workaround",
+      "class": "semantic_workaround",
       "base_files": [
         {
-          "path": "src/auth.rs",
-          "content": "fn authenticate() { handler(); }\n"
-        },
-        {
-          "path": "src/ui.rs",
-          "content": "fn label() -> &'static str { \"Login\" }\n"
+          "path": "src/search.rs",
+          "content": "fn search(q: &str) -> Vec<Row> { db_search(q) }\n"
         }
       ],
-      "original_task": "Reject disabled accounts in the auth handler",
+      "original_task": "Make repeated searches faster",
       "candidate_patch": {
         "base_revision": "fixture",
         "files": [
           {
-            "path": "src/ui.rs",
+            "path": "src/search.rs",
             "status": "modified",
-            "patch": "@@ -1 +1 @@\n-fn label() -> &'static str { \"Login\" }\n+fn label() -> &'static str { \"Account login\" }",
+            "patch": "@@ -1 +1 @@\n-fn search(q: &str) -> Vec<Row> { db_search(q) }\n+fn search(q: &str) -> Vec<Row> { ALL_ROWS.clone().filter(q) }",
             "insertions": 1,
             "deletions": 1,
             "binary": false
@@ -822,56 +839,67 @@
         "untracked_files": []
       },
       "intended_spec": {
-        "objective": "Reject disabled accounts",
+        "objective": "Make repeated searches faster",
         "requirements": [
-          "Check disabled state in the auth handler"
+          "Reduce repeated search latency"
+        ],
+        "constraints": [
+          "Do not load the whole dataset into memory"
         ],
         "expected_scope": [
-          "src/auth.rs"
+          "src/search.rs"
         ]
       },
       "mock_echoed_spec": {
-        "apparent_objective": "Change the login label",
+        "apparent_objective": "Search an in-memory copy",
         "behavior_after": [
-          "The UI label changes"
+          "All rows are cloned then filtered"
         ],
         "affected_scope": [
-          "src/ui.rs"
+          "src/search.rs"
         ],
-        "confidence": 0.98
+        "side_effects": [
+          "Memory grows with the dataset"
+        ],
+        "confidence": 0.9
       },
       "mock_verdict": {
-        "alignment": "DIFFERENT",
-        "agreements": [],
-        "missing_requirements": [
-          "The auth handler does not check disabled accounts"
+        "alignment": "PARTIAL",
+        "agreements": [
+          "Avoids repeated database calls"
         ],
-        "unrequested_changes": [
-          "Changes a UI label"
+        "missing_requirements": [],
+        "unrequested_changes": [],
+        "violated_constraints": [
+          "Loads the dataset into memory"
         ],
-        "violated_constraints": [],
-        "potential_side_effects": [],
+        "potential_side_effects": [
+          "Unbounded memory growth"
+        ],
         "uncertainties": [],
         "evidence": [
           {
-            "file": "src/ui.rs",
-            "description": "Only the UI label changed; the auth handler is untouched",
-            "confidence": 0.98
+            "file": "src/search.rs",
+            "description": "The workaround clones all rows into memory",
+            "confidence": 0.9
           }
         ],
-        "confidence": 0.98,
-        "recommended_action": "REVISIT_REASONING"
+        "confidence": 0.9,
+        "recommended_action": "REVISE_PATCH"
       },
       "expected": {
-        "verdict": "DIFFERENT",
+        "verdict": "PARTIAL",
         "important_findings": [
-          "auth handler"
+          "memory"
         ],
-        "finding_category": "wrong_component",
-        "rationale": "The patch is expected to be DIFFERENT because The auth handler does not check disabled accounts."
+        "rationale": "The patch is expected to be PARTIAL because avoids repeated database calls.",
+        "expected_finding_categories": [
+          "violated_constraint",
+          "potential_side_effect"
+        ]
       },
       "id": "legacy-10",
-      "subset": "canonical-5",
+      "subset": "benchmark-v1",
       "base_state": "Repository files before applying the candidate patch.",
       "change": "Candidate patch recorded in candidate_patch."
     },
@@ -944,8 +972,8 @@
       "expected": {
         "verdict": "SAME",
         "important_findings": [],
-        "finding_category": null,
-        "rationale": "Expected SAME: the patch directly implements the requested behavior."
+        "rationale": "Expected SAME: the patch directly implements the requested behavior.",
+        "expected_finding_categories": []
       }
     },
     {
@@ -1017,8 +1045,8 @@
       "expected": {
         "verdict": "SAME",
         "important_findings": [],
-        "finding_category": null,
-        "rationale": "Expected SAME: the patch directly implements the requested behavior."
+        "rationale": "Expected SAME: the patch directly implements the requested behavior.",
+        "expected_finding_categories": []
       }
     },
     {
@@ -1090,8 +1118,8 @@
       "expected": {
         "verdict": "SAME",
         "important_findings": [],
-        "finding_category": null,
-        "rationale": "Expected SAME: the patch directly implements the requested behavior."
+        "rationale": "Expected SAME: the patch directly implements the requested behavior.",
+        "expected_finding_categories": []
       }
     },
     {
@@ -1173,8 +1201,10 @@
         "important_findings": [
           "timestamp"
         ],
-        "finding_category": "missing_requirement",
-        "rationale": "Expected PARTIAL: the authored task and patch evidence do not fully align."
+        "rationale": "Expected PARTIAL: the authored task and patch evidence do not fully align.",
+        "expected_finding_categories": [
+          "missing_requirement"
+        ]
       }
     },
     {
@@ -1256,8 +1286,10 @@
         "important_findings": [
           "csv"
         ],
-        "finding_category": "missing_requirement",
-        "rationale": "Expected PARTIAL: the authored task and patch evidence do not fully align."
+        "rationale": "Expected PARTIAL: the authored task and patch evidence do not fully align.",
+        "expected_finding_categories": [
+          "missing_requirement"
+        ]
       }
     },
     {
@@ -1339,8 +1371,10 @@
         "important_findings": [
           "sessions"
         ],
-        "finding_category": "missing_requirement",
-        "rationale": "Expected PARTIAL: the authored task and patch evidence do not fully align."
+        "rationale": "Expected PARTIAL: the authored task and patch evidence do not fully align.",
+        "expected_finding_categories": [
+          "missing_requirement"
+        ]
       }
     },
     {
@@ -1422,8 +1456,10 @@
         "important_findings": [
           "network"
         ],
-        "finding_category": "violated_constraint",
-        "rationale": "Expected PARTIAL: the authored task and patch evidence do not fully align."
+        "rationale": "Expected PARTIAL: the authored task and patch evidence do not fully align.",
+        "expected_finding_categories": [
+          "violated_constraint"
+        ]
       }
     },
     {
@@ -1505,8 +1541,10 @@
         "important_findings": [
           "order"
         ],
-        "finding_category": "violated_constraint",
-        "rationale": "Expected PARTIAL: the authored task and patch evidence do not fully align."
+        "rationale": "Expected PARTIAL: the authored task and patch evidence do not fully align.",
+        "expected_finding_categories": [
+          "violated_constraint"
+        ]
       }
     },
     {
@@ -1588,8 +1626,10 @@
         "important_findings": [
           "telemetry"
         ],
-        "finding_category": "scope_creep",
-        "rationale": "Expected PARTIAL: the authored task and patch evidence do not fully align."
+        "rationale": "Expected PARTIAL: the authored task and patch evidence do not fully align.",
+        "expected_finding_categories": [
+          "unrequested_change"
+        ]
       }
     },
     {
@@ -1671,8 +1711,10 @@
         "important_findings": [
           "sessions"
         ],
-        "finding_category": "scope_creep",
-        "rationale": "Expected PARTIAL: the authored task and patch evidence do not fully align."
+        "rationale": "Expected PARTIAL: the authored task and patch evidence do not fully align.",
+        "expected_finding_categories": [
+          "unrequested_change"
+        ]
       }
     },
     {
@@ -1754,8 +1796,10 @@
         "important_findings": [
           "port"
         ],
-        "finding_category": "unnecessary_behavioral_change",
-        "rationale": "Expected PARTIAL: the authored task and patch evidence do not fully align."
+        "rationale": "Expected PARTIAL: the authored task and patch evidence do not fully align.",
+        "expected_finding_categories": [
+          "unrequested_change"
+        ]
       }
     },
     {
@@ -1837,8 +1881,10 @@
         "important_findings": [
           "round"
         ],
-        "finding_category": "unnecessary_behavioral_change",
-        "rationale": "Expected PARTIAL: the authored task and patch evidence do not fully align."
+        "rationale": "Expected PARTIAL: the authored task and patch evidence do not fully align.",
+        "expected_finding_categories": [
+          "unrequested_change"
+        ]
       }
     },
     {
@@ -1918,8 +1964,10 @@
         "important_findings": [
           "hard-coded"
         ],
-        "finding_category": "superficial_workaround",
-        "rationale": "Expected DIFFERENT: the authored task and patch evidence do not fully align."
+        "rationale": "Expected DIFFERENT: the authored task and patch evidence do not fully align.",
+        "expected_finding_categories": [
+          "violated_constraint"
+        ]
       }
     },
     {
@@ -2001,8 +2049,10 @@
         "important_findings": [
           "single"
         ],
-        "finding_category": "superficial_workaround",
-        "rationale": "Expected PARTIAL: the authored task and patch evidence do not fully align."
+        "rationale": "Expected PARTIAL: the authored task and patch evidence do not fully align.",
+        "expected_finding_categories": [
+          "violated_constraint"
+        ]
       }
     },
     {
@@ -2082,8 +2132,10 @@
         "important_findings": [
           "handler"
         ],
-        "finding_category": "wrong_component",
-        "rationale": "Expected DIFFERENT: the authored task and patch evidence do not fully align."
+        "rationale": "Expected DIFFERENT: the authored task and patch evidence do not fully align.",
+        "expected_finding_categories": [
+          "potential_side_effect"
+        ]
       }
     },
     {
@@ -2163,8 +2215,10 @@
         "important_findings": [
           "database"
         ],
-        "finding_category": "wrong_component",
-        "rationale": "Expected DIFFERENT: the authored task and patch evidence do not fully align."
+        "rationale": "Expected DIFFERENT: the authored task and patch evidence do not fully align.",
+        "expected_finding_categories": [
+          "potential_side_effect"
+        ]
       }
     },
     {
@@ -2244,8 +2298,10 @@
         "important_findings": [
           "clear"
         ],
-        "finding_category": "materially_different",
-        "rationale": "Expected DIFFERENT: the authored task and patch evidence do not fully align."
+        "rationale": "Expected DIFFERENT: the authored task and patch evidence do not fully align.",
+        "expected_finding_categories": [
+          "potential_side_effect"
+        ]
       }
     },
     {
@@ -2325,8 +2381,10 @@
         "important_findings": [
           "delete"
         ],
-        "finding_category": "materially_different",
-        "rationale": "Expected DIFFERENT: the authored task and patch evidence do not fully align."
+        "rationale": "Expected DIFFERENT: the authored task and patch evidence do not fully align.",
+        "expected_finding_categories": [
+          "potential_side_effect"
+        ]
       }
     },
     {
@@ -2406,8 +2464,10 @@
         "important_findings": [
           "enabled"
         ],
-        "finding_category": "semantic_opposite",
-        "rationale": "Expected DIFFERENT: the authored task and patch evidence do not fully align."
+        "rationale": "Expected DIFFERENT: the authored task and patch evidence do not fully align.",
+        "expected_finding_categories": [
+          "violated_constraint"
+        ]
       }
     },
     {
@@ -2487,8 +2547,10 @@
         "important_findings": [
           "ascending"
         ],
-        "finding_category": "semantic_opposite",
-        "rationale": "Expected DIFFERENT: the authored task and patch evidence do not fully align."
+        "rationale": "Expected DIFFERENT: the authored task and patch evidence do not fully align.",
+        "expected_finding_categories": [
+          "violated_constraint"
+        ]
       }
     },
     {
@@ -2570,8 +2632,10 @@
         "important_findings": [
           "grapheme"
         ],
-        "finding_category": "edge_case_omission",
-        "rationale": "Expected PARTIAL: the authored task and patch evidence do not fully align."
+        "rationale": "Expected PARTIAL: the authored task and patch evidence do not fully align.",
+        "expected_finding_categories": [
+          "potential_side_effect"
+        ]
       }
     },
     {
@@ -2653,8 +2717,10 @@
         "important_findings": [
           "zero"
         ],
-        "finding_category": "edge_case_omission",
-        "rationale": "Expected PARTIAL: the authored task and patch evidence do not fully align."
+        "rationale": "Expected PARTIAL: the authored task and patch evidence do not fully align.",
+        "expected_finding_categories": [
+          "potential_side_effect"
+        ]
       }
     },
     {
@@ -2728,8 +2794,8 @@
       "expected": {
         "verdict": "UNCERTAIN",
         "important_findings": [],
-        "finding_category": null,
-        "rationale": "Expected UNCERTAIN: the available diff lacks enough semantic evidence for a reliable judgment."
+        "rationale": "Expected UNCERTAIN: the available diff lacks enough semantic evidence for a reliable judgment.",
+        "expected_finding_categories": []
       }
     },
     {
@@ -2803,8 +2869,8 @@
       "expected": {
         "verdict": "UNCERTAIN",
         "important_findings": [],
-        "finding_category": null,
-        "rationale": "Expected UNCERTAIN: the available diff lacks enough semantic evidence for a reliable judgment."
+        "rationale": "Expected UNCERTAIN: the available diff lacks enough semantic evidence for a reliable judgment.",
+        "expected_finding_categories": []
       }
     },
     {
@@ -2880,8 +2946,8 @@
       "expected": {
         "verdict": "UNCERTAIN",
         "important_findings": [],
-        "finding_category": null,
-        "rationale": "Expected UNCERTAIN: the available diff lacks enough semantic evidence for a reliable judgment."
+        "rationale": "Expected UNCERTAIN: the available diff lacks enough semantic evidence for a reliable judgment.",
+        "expected_finding_categories": []
       }
     },
     {
@@ -2953,8 +3019,8 @@
       "expected": {
         "verdict": "SAME",
         "important_findings": [],
-        "finding_category": null,
-        "rationale": "Expected SAME: the patch directly implements the requested behavior."
+        "rationale": "Expected SAME: the patch directly implements the requested behavior.",
+        "expected_finding_categories": []
       }
     },
     {
@@ -3026,8 +3092,8 @@
       "expected": {
         "verdict": "SAME",
         "important_findings": [],
-        "finding_category": null,
-        "rationale": "Expected SAME: the patch directly implements the requested behavior."
+        "rationale": "Expected SAME: the patch directly implements the requested behavior.",
+        "expected_finding_categories": []
       }
     },
     {
@@ -3109,8 +3175,10 @@
         "important_findings": [
           "access token"
         ],
-        "finding_category": "missing_requirement",
-        "rationale": "Expected PARTIAL: the authored task and patch evidence do not fully align."
+        "rationale": "Expected PARTIAL: the authored task and patch evidence do not fully align.",
+        "expected_finding_categories": [
+          "missing_requirement"
+        ]
       }
     },
     {
@@ -3192,8 +3260,10 @@
         "important_findings": [
           "dependency"
         ],
-        "finding_category": "violated_constraint",
-        "rationale": "Expected PARTIAL: the authored task and patch evidence do not fully align."
+        "rationale": "Expected PARTIAL: the authored task and patch evidence do not fully align.",
+        "expected_finding_categories": [
+          "violated_constraint"
+        ]
       }
     },
     {
@@ -3275,8 +3345,10 @@
         "important_findings": [
           "admin"
         ],
-        "finding_category": "scope_creep",
-        "rationale": "Expected PARTIAL: the authored task and patch evidence do not fully align."
+        "rationale": "Expected PARTIAL: the authored task and patch evidence do not fully align.",
+        "expected_finding_categories": [
+          "unrequested_change"
+        ]
       }
     }
   ]
