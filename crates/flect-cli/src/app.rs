@@ -104,6 +104,7 @@ pub async fn run(command: Command, json_output: bool) -> Result<()> {
         }
         Command::Inspect { run, context } => inspect(run.as_deref(), context, json_output),
         Command::Doctor => doctor(json_output),
+        Command::Mcp => crate::mcp::run(),
         Command::Skill { command } => skill(&command, json_output),
     }
 }

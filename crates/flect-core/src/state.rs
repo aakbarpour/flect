@@ -40,6 +40,8 @@ pub enum StateError {
     NoRuns,
     #[error("Flect run `{0}` does not exist in this repository")]
     RunNotFound(String),
+    #[error("verification result for Flect run `{0}` does not exist; run `flect verify` first")]
+    VerificationNotFound(String),
     #[error("Flect state uses unsupported version {0}; this release supports version 1")]
     UnsupportedVersion(u32),
 }
@@ -100,6 +102,27 @@ impl RunStore {
             source,
         })?;
         write_json(&directory.join(format!("{}.json", result.run_id)), result)
+    }
+
+    /// Loads a verification result by run ID, or for the latest run when omitted.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`StateError`] when no matching result exists or its JSON is invalid.
+    pub fn load_verification(&self, id: Option<&str>) -> Result<VerificationRecord, StateError> {
+        let id = match id {
+            Some(id) => id.to_owned(),
+            None => self.latest_id()?,
+        };
+        let path = self.root.join("results").join(format!("{id}.json"));
+        if !path.exists() {
+            return Err(StateError::VerificationNotFound(id));
+        }
+        let result: VerificationRecord = read_json(&path)?;
+        if result.version != 1 {
+            return Err(StateError::UnsupportedVersion(result.version));
+        }
+        Ok(result)
     }
 
     fn latest_id(&self) -> Result<String, StateError> {
