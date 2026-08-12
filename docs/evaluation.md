@@ -8,7 +8,7 @@ The suite contains 6 `SAME`, 22 `PARTIAL`, 9 `DIFFERENT`, and 3 `UNCERTAIN` case
 
 Every manifest records a stable ID, original task, base files and base-state explanation, candidate patch and change explanation, intended spec, independently authored expected alignment, optional important-finding category and probes, and rationale. Finding probes are deliberately coarse diagnostics rather than semantic grading.
 
-The permanent `canonical-5` subset locks these regressions: correct → `SAME`, partial → `PARTIAL`, constraint → `PARTIAL`, scope creep → `PARTIAL`, and wrong component → `DIFFERENT`. Tests lock its membership and labels, suite size, rationales, and the relationship between finding categories and probes.
+The permanent `canonical-5` subset locks these regressions, including their IDs and order: `canonical-01` correct → `SAME`, `canonical-02` partial → `PARTIAL`, `canonical-03` constraint → `PARTIAL`, `canonical-04` scope creep → `PARTIAL`, and `canonical-05` wrong semantic fix/wrong component → `DIFFERENT`. The semantic-workaround fixture remains non-canonical. Tests freeze the IDs, classes, and labels.
 
 ## Deterministic regression mode
 
@@ -36,17 +36,19 @@ The HTTP profile workflow is model-backed but is **not Codex-native**. A result 
 
 ## Metrics and failures
 
-JSON and terminal reports cover attempted and persisted cases, verdict accuracy, per-class accuracy, verifier and judge schema compliance, good-patch acceptance, bad-patch detection, false positives and false negatives, `UNCERTAIN` rate, important-finding detection, finding-category accuracy, evidence-reference validation failures, model calls, total/average/median latency, reported tokens, and estimated cost when pricing is supported. The JSON report includes the full 4×4 confusion matrix (`SAME`, `PARTIAL`, `DIFFERENT`, `UNCERTAIN`) and per-case outcomes.
+JSON and terminal reports use `cases_completed` only for cases that produced a trusted, materialized verdict; this does not claim that a production `VerificationRecord` was persisted. `overall_verdict_accuracy` is exact trusted verdict matches divided by all attempted cases, so every orchestration, provider, schema, or evidence failure reduces it. `completed_verdict_accuracy` is the same numerator divided only by completed cases and must not be read as overall benchmark success.
 
-Malformed model output is a benchmark failure. Every case is attempted independently and retained, including failures. Reports distinguish forward, verifier, and judge schema failures, evidence-validation failures, orchestration failures, and provider/runtime failures. A later stage that could not run is `not_attempted`, not successful. Verifier and judge schema compliance are successful decodes divided by actual attempts at that stage.
+Bad/divergent ground truth contains only expected `PARTIAL` and `DIFFERENT` cases. `bad_patch_detection` counts those receiving `PARTIAL` or `DIFFERENT`; false negatives count those receiving `SAME`; and `bad_patch_abstentions` counts those receiving `UNCERTAIN`. Expected `UNCERTAIN` cases are reported separately and never enter the bad-patch denominator. Actual `UNCERTAIN` verdicts are also reported separately.
 
-Important-finding detection remains coarse, case-authored text-probe matching. Finding-category accuracy is separate: it compares the expected category directly with the categories in the trusted materialized verdict. Evidence references outside the immutable candidate patch are validation failures. Unknown usage or pricing stays `null` rather than being invented.
+Malformed model output is a benchmark failure. Every case is attempted independently and retained, including failures. Each stage records whether it was attempted, whether a provider/runtime failure occurred, whether a structured value was received, and whether schema decoding succeeded. Provider/runtime failures are not schema failures. Verifier and judge schema compliance are successful schema decodes divided by attempted stage responses excluding provider/runtime failures; malformed, schema-invalid, and missing outputs remain in that denominator as failures. A later stage that could not run is not attempted.
+
+Important-finding text-probe recall remains a coarse, case-authored diagnostic. Category scoring is separate and uses independently authored `expected_finding_categories` sets against categories in the trusted materialized verdict. The report provides exact set match plus micro precision and recall; extra incorrect categories therefore fail exact match and reduce precision. Evidence references outside the immutable candidate patch are validation failures. Unknown usage or pricing stays `null` rather than being invented.
 
 Earlier Benchmark v1 code had three reporting defects: the API loop propagated a per-case error and aborted the suite; schema compliance was hard-coded to 100% for produced reports; and category accuracy reused text-probe success rather than inspecting emitted categories. It also asked the judge for the larger persisted `Verdict` instead of the compact production contract. These behaviors made a live report look healthier than the underlying run and must not be used for historical performance claims.
 
 ## Integrity rules
 
-Do not special-case fixtures, weaken schemas or evidence validation, tune a prompt on a case and count that case as unbiased, or revise expected labels after examining Flect output. Prompt-development cases need a separately declared development split before claims on a held-out split. Preserve raw reports with date, code revision, suite hash, model identifiers, and configuration.
+Do not special-case fixtures, weaken schemas or evidence validation, tune a prompt on a case and count that case as unbiased, or revise expected labels after examining Flect output. Prompt-development cases need a separately declared development split before claims on a held-out split. Generated reports contain `source_revision`, `suite_hash`, `generated_at`, and `working_tree_dirty`. `source_revision` is the code revision that executed the run, not a later commit that might archive it. Full deterministic reports are intentionally not committed because their timestamps and revisions create churn; tests and CI generate them on demand. Retain real-run artifacts separately with model identifiers and configuration.
 
 ## Limitations and next experiments
 
