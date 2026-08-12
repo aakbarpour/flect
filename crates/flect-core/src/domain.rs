@@ -37,7 +37,9 @@ impl IntendedSpec {
 }
 
 /// How a path changed relative to the captured base revision.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize, JsonSchema,
+)]
 #[serde(rename_all = "snake_case")]
 pub enum FileStatus {
     Added,
@@ -309,6 +311,45 @@ pub struct Verdict {
     pub recommended_action: RecommendedAction,
 }
 
+/// Minimal verdict payload emitted by an external reconciliation judge.
+///
+/// Flect derives the persisted action, agreement list, and trusted evidence
+/// locations. This keeps the agent-facing contract small without relaxing
+/// validation of the semantic findings or their evidence associations.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct JudgeVerdict {
+    pub alignment: Alignment,
+    pub findings: Vec<JudgeFinding>,
+    pub confidence: f64,
+}
+
+/// One semantic negative finding from an external reconciliation judge.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct JudgeFinding {
+    pub kind: FindingCategory,
+    pub text: String,
+    #[serde(default)]
+    pub evidence_ref: Option<String>,
+}
+
+/// A negative-finding category that Flect expands into stable persisted IDs.
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize, JsonSchema,
+)]
+#[serde(rename_all = "snake_case")]
+pub enum FindingCategory {
+    #[serde(rename = "missing_requirement")]
+    MissingRequirements,
+    #[serde(rename = "unrequested_change")]
+    UnrequestedChanges,
+    #[serde(rename = "violated_constraint")]
+    ViolatedConstraints,
+    #[serde(rename = "potential_side_effect")]
+    PotentialSideEffects,
+}
+
 /// Safe, persisted observability for one semantic model stage.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
@@ -430,7 +471,7 @@ pub struct ReconciliationAgentJob {
 #[serde(deny_unknown_fields)]
 pub struct ReconciliationAgentSubmission {
     pub job_id: String,
-    pub verdict: Verdict,
+    pub verdict: JudgeVerdict,
     pub model: Option<String>,
     #[serde(default)]
     pub model_selection: AgentModelSelection,

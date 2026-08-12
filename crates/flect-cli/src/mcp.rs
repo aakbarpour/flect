@@ -7,8 +7,8 @@ use std::process::Command;
 
 use flect_app::AgentService;
 use flect_core::{
-    BlindAgentSubmission, ContextPolicy, EchoedSpec, GitRepository, ReconciliationAgentSubmission,
-    RunStore, Verdict,
+    BlindAgentSubmission, ContextPolicy, EchoedSpec, GitRepository, JudgeVerdict,
+    ReconciliationAgentSubmission, RunStore,
 };
 use miette::{IntoDiagnostic, Result, WrapErr};
 use schemars::schema_for;
@@ -610,7 +610,7 @@ fn tools() -> Vec<Value> {
         tool(
             "flect_submit_verdict",
             "Validate a judge Verdict against available evidence and persist the final result.",
-            agent_submission_schema("verdict", json!(schema_for!(Verdict))),
+            agent_submission_schema("verdict", json!(schema_for!(JudgeVerdict))),
             false,
         ),
         tool(

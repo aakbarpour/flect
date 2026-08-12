@@ -4,9 +4,9 @@ use std::process::Command;
 
 use flect_app::{AgentService, AgentWorkflowError, CleanupOptions};
 use flect_core::{
-    AffectedScope, AgentModelSelection, Alignment, BlindAgentSubmission, EchoedSpec, Evidence,
-    GitRepository, IntendedSpec, RecommendedAction, ReconciliationAgentSubmission, RunRecord,
-    RunStore, TaskInput, Verdict,
+    AffectedScope, AgentModelSelection, Alignment, BlindAgentSubmission, EchoedSpec,
+    FindingCategory, GitRepository, IntendedSpec, JudgeFinding, JudgeVerdict,
+    ReconciliationAgentSubmission, RunRecord, RunStore, TaskInput,
 };
 
 const TASK_SENTINEL: &str = "ORIGINAL_TASK_SECRET_7F91";
@@ -69,21 +69,13 @@ fn complete_agent_handoff_is_blind_validated_and_persisted() {
     assert_eq!(judge.echoed_spec, echoed);
     assert!(judge.intended_spec.objective.contains(FORWARD_SENTINEL));
 
-    let finding = "Legacy fallback remains unchanged".to_owned();
     let record = service
         .submit_verdict(ReconciliationAgentSubmission {
             job_id: judge.job_id,
-            verdict: Verdict {
+            verdict: JudgeVerdict {
                 alignment: Alignment::Same,
-                agreements: vec![finding],
-                missing_requirements: Vec::new(),
-                unrequested_changes: Vec::new(),
-                violated_constraints: Vec::new(),
-                potential_side_effects: Vec::new(),
-                uncertainties: Vec::new(),
-                evidence: Vec::new(),
+                findings: Vec::new(),
                 confidence: 0.9,
-                recommended_action: RecommendedAction::Ship,
             },
             model: Some("runtime-inherited".to_owned()),
             model_selection: AgentModelSelection::Inherited,
@@ -127,7 +119,7 @@ fn accepts_structured_scope_and_exposes_judge_evidence_contract() {
         })
         .unwrap();
     let judge = service.prepare_reconciliation(&blind.job_id).unwrap();
-    assert_eq!(judge.evidence_contract["version"], 1);
+    assert_eq!(judge.evidence_contract["version"], 2);
     assert!(
         judge.evidence_contract["rules"]
             .as_array()
@@ -143,6 +135,93 @@ fn accepts_structured_scope_and_exposes_judge_evidence_contract() {
             .iter()
             .all(|hunk| hunk["hunk"].as_str().unwrap().starts_with("@@ "))
     );
+    assert_eq!(
+        judge.evidence_contract["files"][0]["hunks"][0]["hunk_id"],
+        "hunk/0"
+    );
+}
+
+#[test]
+fn rejects_the_four_observed_judge_wrapper_shapes() {
+    let raw = [
+        serde_json::json!({"verdict": "PARTIAL", "evidence": {"finding_ids": ["missing_requirements/0"]}}),
+        serde_json::json!({"verdict": "PARTIAL", "findings": []}),
+        serde_json::json!({"verdict": "PARTIAL", "summary": "scope creep", "evidence": {}}),
+        serde_json::json!({"verdict": "DIFFERENT", "summary": "semantic mismatch", "evidence": {}}),
+    ];
+    for payload in raw {
+        assert!(serde_json::from_value::<JudgeVerdict>(payload).is_err());
+    }
+}
+
+#[test]
+fn rejects_observed_malformed_compact_judge_shapes() {
+    let raw = [
+        serde_json::json!({"alignment": "PARTIAL", "findings": []}),
+        serde_json::json!({"alignment": "PARTIAL", "confidence": 0.9}),
+        serde_json::json!({"alignment": "PARTIAL", "findings": [], "confidence": 0.9, "summary": "extra"}),
+        serde_json::json!({"alignment": "PARTIAL", "findings": [{"kind": "missing_requirements", "text": "x"}], "confidence": 0.9}),
+        serde_json::json!({"alignment": "PARTIAL", "findings": [{"kind": "missing_requirement", "text": "x"}], "confidence": "high"}),
+    ];
+    for payload in raw {
+        assert!(serde_json::from_value::<JudgeVerdict>(payload).is_err());
+    }
+}
+
+#[test]
+fn rejects_semantically_incompatible_compact_judge_output() {
+    let repository = fixture_repository();
+    let workspace = tempfile::tempdir().unwrap();
+    let service = AgentService::with_workspace_root(
+        GitRepository::discover(repository.path()).unwrap(),
+        workspace.path().join("jobs"),
+    )
+    .unwrap();
+    let bundle = service.prepare_blind(None, None).unwrap().bundle;
+
+    for verdict in [
+        JudgeVerdict {
+            alignment: Alignment::Same,
+            findings: vec![JudgeFinding {
+                kind: FindingCategory::UnrequestedChanges,
+                text: "unexpected change".to_owned(),
+                evidence_ref: None,
+            }],
+            confidence: 0.9,
+        },
+        JudgeVerdict {
+            alignment: Alignment::Partial,
+            findings: Vec::new(),
+            confidence: 0.9,
+        },
+        JudgeVerdict {
+            alignment: Alignment::Different,
+            findings: Vec::new(),
+            confidence: 1.1,
+        },
+        JudgeVerdict {
+            alignment: Alignment::Partial,
+            findings: vec![JudgeFinding {
+                kind: FindingCategory::MissingRequirements,
+                text: "  ".to_owned(),
+                evidence_ref: None,
+            }],
+            confidence: 0.9,
+        },
+    ] {
+        assert!(flect_app::materialize_judge_verdict(verdict, &bundle).is_err());
+    }
+}
+
+#[test]
+fn rejects_fabricated_agent_facing_evidence_fields() {
+    for evidence in [
+        serde_json::json!({"kind": "missing_requirement", "text": "x", "file": "invented.rs"}),
+        serde_json::json!({"kind": "missing_requirement", "text": "x", "line_start": 99}),
+        serde_json::json!({"finding_ids": ["missing_requirements/99"], "description": "x"}),
+    ] {
+        assert!(serde_json::from_value::<JudgeFinding>(evidence).is_err());
+    }
 }
 
 #[test]
@@ -328,25 +407,14 @@ fn rejects_fabricated_verdict_evidence() {
     let finding = "The requested behavior is missing".to_owned();
     let result = service.submit_verdict(ReconciliationAgentSubmission {
         job_id: judge.job_id,
-        verdict: Verdict {
+        verdict: JudgeVerdict {
             alignment: Alignment::Partial,
-            agreements: Vec::new(),
-            missing_requirements: vec![finding.clone()],
-            unrequested_changes: Vec::new(),
-            violated_constraints: Vec::new(),
-            potential_side_effects: Vec::new(),
-            uncertainties: Vec::new(),
-            evidence: vec![Evidence {
-                file: Some("invented.rs".to_owned()),
-                line_start: None,
-                line_end: None,
-                patch_hunk: None,
-                finding_ids: Vec::new(),
-                description: finding,
-                confidence: 0.8,
+            findings: vec![JudgeFinding {
+                kind: FindingCategory::MissingRequirements,
+                text: finding,
+                evidence_ref: Some("hunk/999".to_owned()),
             }],
             confidence: 0.8,
-            recommended_action: RecommendedAction::RevisePatch,
         },
         model: None,
         model_selection: AgentModelSelection::Unknown,
