@@ -165,6 +165,7 @@ Dry-run output includes the provider, model, context policy, included patch/cont
 - `flect echo [REVISION]` — describe a patch without needing an original task.
 - `flect doctor` — check Git, repository discovery, configuration, and runner readiness.
 - `flect config show|set KEY VALUE` — inspect or update common configuration fields.
+- `flect agent cleanup` — report and remove Flect-owned completed verifier workspaces; use `--dry-run`, `--older-than HOURS`, or explicit `--all` as needed.
 - `flect mcp` — serve automated and agent-mediated Flect tools over stdio MCP.
 - `flect eval` — run deterministic fixtures or an explicitly opt-in model comparison.
 - `flect skill install|status|uninstall` — safely manage the project-local Codex Skill.
@@ -183,6 +184,8 @@ flect skill status
 Installation targets `.agents/skills/flect`, is idempotent, and refuses to overwrite modified content. `flect skill uninstall` removes only files whose contents still exactly match the Flect-owned bundle; modified or additional files are preserved.
 
 The Skill keeps the active implementation agent out of the verifier role. In Codex-native mode it requires a fresh child with no inherited turns and a distinct fresh judge; in API mode Flect makes the configured Responses-compatible calls. See [isolation assurance](skills/flect/references/isolation.md) before describing either result.
+
+Completed Codex-native handoffs persist the verification record and then remove their Flect-owned temporary blind workspace by default. Unfinished workspaces are retained for diagnosis. `flect agent cleanup --dry-run` reports eligible completed jobs; `--older-than HOURS` selects stale jobs and `--all` intentionally discards unfinished forensic state. Cleanup rejects paths that cannot be proven to be an immediate child of Flect's temporary workspace root and outside the repository.
 
 ## Codex MCP
 
