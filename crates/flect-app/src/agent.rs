@@ -17,7 +17,7 @@ use thiserror::Error;
 use crate::{EvidenceError, materialize_judge_verdict};
 
 const VERIFIER_INSTRUCTIONS: &str = "You are the blind Flect verifier. You have not been given the original task. Do not attempt to discover it. Inspect only the supplied sanitized patch evidence. Determine what behavior this patch appears to add, remove, or change. Return only a valid EchoedSpec matching the supplied schema. Each affected_scope entry is an object: file must exactly equal a path in the supplied manifest; symbol is optional descriptive function, class, or region detail and is not a path. Do not perform general style review. Do not invent files, lines, requirements, or motivations. Preserve uncertainty.";
-const JUDGE_INSTRUCTIONS: &str = "You are the Flect reconciliation judge. Return JSON only: one object matching verdict_schema, with no wrapper, prose, Markdown, or extra keys. Make the smallest semantic judgment: alignment, plus zero or more findings. Each finding has kind, text, and optional evidence_ref. Use only kind values and evidence_ref values listed in evidence_contract. Never emit actions, IDs, files, patch text, or line ranges. SAME has zero findings. Flect derives the trusted persisted Verdict.";
+const JUDGE_INSTRUCTIONS: &str = "You are the Flect reconciliation judge. Return JSON only: one object matching verdict_schema, with no wrapper, prose, Markdown, or extra keys. Compare IntendedSpec with EchoedSpec and make only the smallest semantic judgment: alignment, findings, and confidence. Each finding has kind, text, and optional evidence_ref. Use only kind values and evidence_ref values listed in evidence_contract. Never emit actions, IDs, files, patch text, line ranges, summaries, or uncertainties. SAME must have zero findings; PARTIAL and DIFFERENT must have at least one finding. Flect derives the trusted persisted Verdict.";
 static JOB_SEQUENCE: AtomicU64 = AtomicU64::new(0);
 
 #[derive(Debug, Error)]
@@ -532,24 +532,24 @@ fn evidence_contract(bundle: &BlindBundle) -> Value {
     serde_json::json!({
         "version": 2,
         "allowed_alignments": ["SAME", "PARTIAL", "DIFFERENT", "UNCERTAIN"],
-        "allowed_actions": {
-            "SAME": ["SHIP"],
-            "PARTIAL": ["REVISE_PATCH", "REVISE_BOTH"],
-            "DIFFERENT": ["REVISIT_REASONING", "REVISE_BOTH"],
-            "UNCERTAIN": ["REQUEST_MORE_CONTEXT"]
-        },
         "available_finding_kinds": [
             "missing_requirement",
             "unrequested_change",
             "violated_constraint",
             "potential_side_effect"
         ],
-        "persisted_finding_id_format": "Flect derives <category>/<zero-based-index> from each nonempty submitted category.",
+        "alignment_meanings": {
+            "SAME": "The apparent behavior fulfills the intended objective and material requirements without divergence.",
+            "PARTIAL": "The apparent behavior advances the intended objective but has a missing requirement, violated constraint, or scope divergence.",
+            "DIFFERENT": "The apparent behavior is materially contradictory to or replaces a required behavior, even if a superficial part of the objective changes.",
+            "UNCERTAIN": "The supplied IntendedSpec and EchoedSpec are insufficient for a semantic judgment."
+        },
         "rules": [
             "Return the verdict_schema object directly; do not add a verdict wrapper.",
             "recommended_action, file, patch text, line ranges, and persisted finding IDs are derived by Flect and must not be emitted.",
             "Each finding has kind, text, and optional evidence_ref. evidence_ref, when present, must equal one listed stable hunk ID.",
-            "SAME requires findings to be empty."
+            "SAME requires findings to be empty; PARTIAL and DIFFERENT require at least one finding.",
+            "confidence is required and must be a number from 0 through 1."
         ],
         "finding_example": files.iter().find_map(|file| file["hunks"].as_array().and_then(|hunks| hunks.first()).map(|hunk| serde_json::json!({"kind": "violated_constraint", "text": "The changed setting violates the constraint.", "evidence_ref": hunk["hunk_id"]}))),
         "files": files

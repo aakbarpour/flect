@@ -320,12 +320,8 @@ pub struct Verdict {
 #[serde(deny_unknown_fields)]
 pub struct JudgeVerdict {
     pub alignment: Alignment,
-    #[serde(default)]
     pub findings: Vec<JudgeFinding>,
-    #[serde(default)]
-    pub uncertainties: Vec<String>,
-    #[serde(default)]
-    pub confidence: Option<f64>,
+    pub confidence: f64,
 }
 
 /// One semantic negative finding from an external reconciliation judge.

@@ -229,7 +229,7 @@ fn exercise_agent_handoff(client: &mut McpClient) -> Value {
         &json!({
             "job_id": judge_job_id,
             "verdict": {
-                "alignment": "UNCERTAIN", "uncertainties": ["Offline protocol fixture"],
+                "alignment": "UNCERTAIN", "findings": [],
                 "confidence": 0.4
             },
             "model": "test-judge", "model_selection": "explicit"

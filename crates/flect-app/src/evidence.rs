@@ -24,6 +24,12 @@ pub enum EvidenceError {
     },
     #[error("evidence category `{0}` has no emitted negative findings")]
     EmptyFindingCategory(String),
+    #[error("judge alignment {0} is incompatible with its findings")]
+    IncompatibleJudgeOutput(Alignment),
+    #[error("judge confidence must be finite and between zero and one")]
+    InvalidConfidence,
+    #[error("judge findings must contain non-empty text")]
+    EmptyFindingText,
 }
 
 /// Converts the compact judge payload into Flect's persisted verdict.
@@ -39,6 +45,7 @@ pub fn materialize_judge_verdict(
     judge: JudgeVerdict,
     bundle: &BlindBundle,
 ) -> Result<Verdict, EvidenceError> {
+    validate_judge_semantics(&judge)?;
     let mut verdict = Verdict {
         alignment: judge.alignment,
         agreements: Vec::new(),
@@ -46,9 +53,9 @@ pub fn materialize_judge_verdict(
         unrequested_changes: findings_for(&judge, FindingCategory::UnrequestedChanges),
         violated_constraints: findings_for(&judge, FindingCategory::ViolatedConstraints),
         potential_side_effects: findings_for(&judge, FindingCategory::PotentialSideEffects),
-        uncertainties: judge.uncertainties,
+        uncertainties: Vec::new(),
         evidence: Vec::new(),
-        confidence: judge.confidence.unwrap_or(0.5),
+        confidence: judge.confidence,
         recommended_action: action_for(judge.alignment),
     };
     let ids = finding_ids_by_category(&verdict);
@@ -74,6 +81,27 @@ pub fn materialize_judge_verdict(
     }
     validate_verdict_evidence(&verdict, bundle)?;
     Ok(verdict)
+}
+
+fn validate_judge_semantics(judge: &JudgeVerdict) -> Result<(), EvidenceError> {
+    if !judge.confidence.is_finite() || !(0.0..=1.0).contains(&judge.confidence) {
+        return Err(EvidenceError::InvalidConfidence);
+    }
+    if judge
+        .findings
+        .iter()
+        .any(|finding| finding.text.trim().is_empty())
+    {
+        return Err(EvidenceError::EmptyFindingText);
+    }
+    let compatible = match judge.alignment {
+        Alignment::Same => judge.findings.is_empty(),
+        Alignment::Partial | Alignment::Different => !judge.findings.is_empty(),
+        Alignment::Uncertain => true,
+    };
+    compatible
+        .then_some(())
+        .ok_or(EvidenceError::IncompatibleJudgeOutput(judge.alignment))
 }
 
 fn findings_for(judge: &JudgeVerdict, category: FindingCategory) -> Vec<String> {

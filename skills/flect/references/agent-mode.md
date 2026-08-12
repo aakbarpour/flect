@@ -10,7 +10,7 @@ The verifier returns one JSON object matching `echoed_spec_schema`. Each `affect
 
 ## Judge spawn
 
-After Flect accepts the echo, prepare a reconciliation job and spawn a different fresh child. The judge may receive the job's IntendedSpec, EchoedSpec, available evidence, `evidence_contract`, instructions, and Verdict schema. It must not receive the parent conversation or implementation reasoning. It must use only contract-provided file/hunk/range references and connect every negative finding through `Evidence.finding_ids`; `SAME` needs no artificial negative evidence.
+After Flect accepts the echo, prepare a reconciliation job and spawn a different fresh child. The judge may receive the job's IntendedSpec, EchoedSpec, available evidence, `evidence_contract`, instructions, and judge schema. It must not receive the parent conversation or implementation reasoning. It returns only `alignment`, `findings[{kind,text,evidence_ref}]`, and `confidence`, using only contract-provided stable hunk IDs for evidence refs. Flect derives persisted finding IDs, files, exact hunks, line ranges, and the recommended action; `SAME` has no findings.
 
 Submit the result to Flect. Do not persist or act on an unvalidated verdict.
 
