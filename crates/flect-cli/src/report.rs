@@ -202,6 +202,26 @@ pub fn doctor(value: &Value) {
     );
     println!("MCP server     available (`flect mcp`)");
     println!(
+        "API mode       {} ({})",
+        if value["verification_modes"]["api"]["ready"]
+            .as_bool()
+            .unwrap_or(false)
+        {
+            "ready"
+        } else {
+            "not ready"
+        },
+        value["verification_modes"]["api"]["isolation"]
+            .as_str()
+            .unwrap_or("unknown")
+    );
+    println!(
+        "Agent mode     runtime capability unknown (workspace isolation: {})",
+        value["verification_modes"]["codex_agent"]["workspace_isolation"]
+            .as_str()
+            .unwrap_or("unknown")
+    );
+    println!(
         "\n{}",
         if value["ready"].as_bool().unwrap_or(false) {
             "Ready."

@@ -17,6 +17,14 @@ use serde_json::{Map, Value, json};
 const PROTOCOL_VERSION: &str = "2025-11-25";
 const INSTRUCTIONS: &str = "Use flect_start before implementation. For Codex-native verification, call flect_prepare_blind, hand only its allowed resources to a fresh no-parent-context verifier, submit its EchoedSpec with flect_submit_echo, prepare a separate judge with flect_prepare_reconciliation, and submit its Verdict with flect_submit_verdict. Alternatively, flect_verify retains the configured automated API workflow. Use flect_get_result to retrieve the persisted verdict.";
 
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+enum Lifecycle {
+    #[default]
+    Uninitialized,
+    Initializing,
+    Ready,
+}
+
 pub fn run() -> Result<()> {
     let executable = std::env::current_exe()
         .into_diagnostic()
@@ -38,6 +46,7 @@ fn serve(
     executable: &Path,
     working_directory: &Path,
 ) -> Result<()> {
+    let mut lifecycle = Lifecycle::default();
     for line in input.lines() {
         let line = line
             .into_diagnostic()
@@ -46,7 +55,7 @@ fn serve(
             continue;
         }
         let response = match serde_json::from_str::<Value>(&line) {
-            Ok(request) => handle_request(&request, executable, working_directory),
+            Ok(request) => handle_request(&request, executable, working_directory, &mut lifecycle),
             Err(_) => Some(error_response(Value::Null, -32700, "Parse error")),
         };
         if let Some(response) = response {
@@ -58,7 +67,12 @@ fn serve(
     Ok(())
 }
 
-fn handle_request(request: &Value, executable: &Path, working_directory: &Path) -> Option<Value> {
+fn handle_request(
+    request: &Value,
+    executable: &Path,
+    working_directory: &Path,
+    lifecycle: &mut Lifecycle,
+) -> Option<Value> {
     let Some(object) = request.as_object() else {
         return Some(error_response(Value::Null, -32600, "Invalid Request"));
     };
@@ -77,9 +91,22 @@ fn handle_request(request: &Value, executable: &Path, working_directory: &Path) 
             "Invalid Request",
         ));
     };
-    let id = id?;
+    let Some(id) = id else {
+        if method == "notifications/initialized" && *lifecycle == Lifecycle::Initializing {
+            *lifecycle = Lifecycle::Ready;
+        }
+        return None;
+    };
+    if method == "initialize" && *lifecycle != Lifecycle::Uninitialized {
+        return Some(error_response(id, -32600, "Server already initialized"));
+    }
+    if matches!(method, "tools/list" | "tools/call") && *lifecycle != Lifecycle::Ready {
+        return Some(error_response(id, -32002, "Server not initialized"));
+    }
     let result = match method {
-        "initialize" => initialize(object.get("params")),
+        "initialize" => initialize(object.get("params")).inspect(|_| {
+            *lifecycle = Lifecycle::Initializing;
+        }),
         "ping" => Ok(json!({})),
         "tools/list" => Ok(json!({"tools": tools()})),
         "tools/call" => call_tool(object.get("params"), executable, working_directory),
@@ -658,16 +685,69 @@ mod tests {
 
     #[test]
     fn invalid_protocol_input_returns_standard_errors() {
+        let mut lifecycle = Lifecycle::Ready;
         let request = json!({"jsonrpc": "2.0", "id": 7, "method": "unknown"});
-        let response = handle_request(&request, Path::new("flect"), Path::new(".")).unwrap();
+        let response =
+            handle_request(&request, Path::new("flect"), Path::new("."), &mut lifecycle).unwrap();
         assert_eq!(response["error"]["code"], -32601);
 
         let request = json!({
             "jsonrpc": "2.0", "id": 8, "method": "tools/call",
             "params": {"name": "flect_start", "arguments": {"task": 42}}
         });
-        let response = handle_request(&request, Path::new("flect"), Path::new(".")).unwrap();
+        let response =
+            handle_request(&request, Path::new("flect"), Path::new("."), &mut lifecycle).unwrap();
         assert_eq!(response["error"]["code"], -32602);
+    }
+
+    #[test]
+    fn lifecycle_requires_initialize_then_notification() {
+        let mut lifecycle = Lifecycle::Uninitialized;
+        let list = json!({"jsonrpc": "2.0", "id": 1, "method": "tools/list"});
+        let response =
+            handle_request(&list, Path::new("flect"), Path::new("."), &mut lifecycle).unwrap();
+        assert_eq!(response["error"]["code"], -32002);
+
+        let initialize = json!({
+            "jsonrpc": "2.0", "id": 2, "method": "initialize",
+            "params": {"protocolVersion": PROTOCOL_VERSION}
+        });
+        let response = handle_request(
+            &initialize,
+            Path::new("flect"),
+            Path::new("."),
+            &mut lifecycle,
+        )
+        .unwrap();
+        assert_eq!(response["result"]["protocolVersion"], PROTOCOL_VERSION);
+        assert_eq!(lifecycle, Lifecycle::Initializing);
+
+        let response =
+            handle_request(&list, Path::new("flect"), Path::new("."), &mut lifecycle).unwrap();
+        assert_eq!(response["error"]["code"], -32002);
+        let initialized = json!({"jsonrpc": "2.0", "method": "notifications/initialized"});
+        assert!(
+            handle_request(
+                &initialized,
+                Path::new("flect"),
+                Path::new("."),
+                &mut lifecycle
+            )
+            .is_none()
+        );
+        assert_eq!(lifecycle, Lifecycle::Ready);
+        let response =
+            handle_request(&list, Path::new("flect"), Path::new("."), &mut lifecycle).unwrap();
+        assert!(response["result"]["tools"].is_array());
+
+        let duplicate = handle_request(
+            &initialize,
+            Path::new("flect"),
+            Path::new("."),
+            &mut lifecycle,
+        )
+        .unwrap();
+        assert_eq!(duplicate["error"]["code"], -32600);
     }
 
     #[test]
