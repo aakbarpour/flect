@@ -263,6 +263,19 @@ pub struct Verdict {
     pub recommended_action: RecommendedAction,
 }
 
+/// Safe, persisted observability for one semantic model stage.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct ModelCallRecord {
+    pub stage: String,
+    pub provider: String,
+    pub model: String,
+    pub latency_ms: u64,
+    pub input_tokens: Option<u64>,
+    pub cached_input_tokens: Option<u64>,
+    pub output_tokens: Option<u64>,
+}
+
 /// Persisted state captured before implementation begins.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
@@ -273,6 +286,8 @@ pub struct RunRecord {
     pub base_revision: String,
     pub task: TaskInput,
     pub intended_spec: IntendedSpec,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub model_calls: Vec<ModelCallRecord>,
     pub created_unix_ms: u64,
 }
 
@@ -285,5 +300,7 @@ pub struct VerificationRecord {
     pub bundle: BlindBundle,
     pub echoed_spec: EchoedSpec,
     pub verdict: Verdict,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub model_calls: Vec<ModelCallRecord>,
     pub verified_unix_ms: u64,
 }

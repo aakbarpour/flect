@@ -167,6 +167,7 @@ mod tests {
                 text: "Fix it".to_owned(),
             },
             intended_spec: IntendedSpec::default(),
+            model_calls: Vec::new(),
             created_unix_ms: 0,
         };
         store.save_run(&run).unwrap();
@@ -186,6 +187,7 @@ mod tests {
                 text: "Fix it".to_owned(),
             },
             intended_spec: IntendedSpec::default(),
+            model_calls: Vec::new(),
             created_unix_ms: 0,
         };
         store.save_run(&run).unwrap();

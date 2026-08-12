@@ -8,7 +8,7 @@ It gives an independent verifier the patch without the original task, reconstruc
 
 Tests ask whether the code works. Flect asks whether you built the right thing.
 
-> **Project status:** Milestones 0 and 1 are implemented. The CLI, Git capture, privacy boundary, structured domain, offline fixtures, and deterministic reconciliation are usable. Milestone 2 has a tested Responses API transport, while semantic pipeline orchestration is still in progress. Until that orchestration lands, verification remains mock-only and never silently invokes an API.
+> **Project status:** Milestones 0, 1, and the core Milestone 2 semantic pipeline are implemented. Flect can run deterministic offline verification or use an OpenAI-compatible Responses endpoint for forward analysis, structurally blind reconstruction, and semantic reconciliation. Model fallback, integrations, evaluation, and release packaging remain in progress.
 
 ## How it works
 
@@ -105,7 +105,16 @@ reasoning_effort = "medium"
 timeout_seconds = 120
 ```
 
-Set the named environment variable outside the configuration file. `flect doctor` reports whether it is present without printing its value. The `verify` and `echo` commands will begin using this transport when the semantic orchestration work lands; today they fail clearly when `kind = "api"` instead of falling back to mock output.
+Set the named environment variable outside the configuration file. `flect doctor` reports whether it is present without printing its value. With `kind = "api"`, `flect start` generates the forward specification, `flect echo` performs blind reconstruction, and `flect verify` performs blind reconstruction followed by semantic reconciliation. Provider, model, latency, and reported token usage are persisted with the relevant run or verification result; credential values are not.
+
+Before making a paid request, inspect the exact privacy boundary and runner selection:
+
+```console
+flect verify --dry-run
+flect --json verify --dry-run
+```
+
+Dry-run output includes the provider, model, context policy, included patch/context files, and excluded paths. It never initializes the API runner or reads the credential value.
 
 ## Commands
 

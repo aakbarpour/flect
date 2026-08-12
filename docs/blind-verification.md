@@ -26,5 +26,4 @@ BlindGuard fails closed if configuration would retain Git metadata, branch names
 - `DIFFERENT`: the implementation evidence materially points to another objective.
 - `UNCERTAIN`: the available evidence does not support a responsible verdict.
 
-Milestone 1's deterministic reconciler uses conservative lexical coverage over typed fields. It is an offline baseline and fixture harness, not a substitute for the backward verifier planned for Milestone 2.
-
+The deterministic reconciler uses conservative lexical coverage over typed fields and remains the offline baseline and fixture oracle. API mode uses a separate semantic reconciliation call after blind reconstruction. Model-supplied file and hunk locations are validated against the captured patch; unverifiable locations are removed rather than presented as evidence.

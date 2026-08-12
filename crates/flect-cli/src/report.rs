@@ -103,6 +103,49 @@ pub fn inspection(bundle: &BlindBundle) {
     }
 }
 
+pub fn dry_run(value: &Value) {
+    println!("Flect verification dry run\n");
+    println!("Request sent    no");
+    println!(
+        "Runner          {}",
+        value["runner"]["provider"].as_str().unwrap_or("unknown")
+    );
+    println!(
+        "Model           {}",
+        value["runner"]["model"]
+            .as_str()
+            .unwrap_or("not configured")
+    );
+    println!(
+        "Context         {}",
+        value["context_policy"].as_str().unwrap_or("unknown")
+    );
+    println!("\nIncluded patch files");
+    for file in value["included"]["patch_files"]
+        .as_array()
+        .into_iter()
+        .flatten()
+    {
+        println!("  {}", file.as_str().unwrap_or("unknown"));
+    }
+    println!("\nIncluded context files");
+    for file in value["included"]["context_files"]
+        .as_array()
+        .into_iter()
+        .flatten()
+    {
+        println!("  {}", file.as_str().unwrap_or("unknown"));
+    }
+    println!("\nExcluded files");
+    for excluded in value["excluded"].as_array().into_iter().flatten() {
+        println!(
+            "  {} — {}",
+            excluded["path"].as_str().unwrap_or("unknown"),
+            excluded["reason"].as_str().unwrap_or("unspecified")
+        );
+    }
+}
+
 pub fn doctor(value: &Value) {
     println!("Flect doctor\n");
     println!(

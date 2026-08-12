@@ -191,6 +191,28 @@ fn rejects_missing_environment_credential() {
     assert!(matches!(error, RunnerError::MissingCredential { .. }));
 }
 
+#[tokio::test]
+#[ignore = "opt-in paid smoke test; requires OPENAI_API_KEY and FLECT_REAL_MODEL"]
+async fn real_provider_structured_output_smoke() {
+    let model = std::env::var("FLECT_REAL_MODEL")
+        .expect("set FLECT_REAL_MODEL to opt in to the paid provider smoke test");
+    let runner = OpenAiResponsesRunner::from_env(OpenAiResponsesConfig {
+        base_url: std::env::var("FLECT_REAL_BASE_URL")
+            .unwrap_or_else(|_| "https://api.openai.com/v1".to_owned()),
+        api_key_env: "OPENAI_API_KEY".to_owned(),
+        model,
+        reasoning_effort: "low".to_owned(),
+        timeout: Duration::from_secs(120),
+    })
+    .unwrap();
+    let output = runner
+        .generate_structured(&request(), &schema())
+        .await
+        .unwrap();
+    assert!(output.value["answer"].is_string());
+    assert!(!output.metadata.model.is_empty());
+}
+
 fn runner(base_url: &str, key: &str) -> OpenAiResponsesRunner {
     OpenAiResponsesRunner::new(
         OpenAiResponsesConfig {
