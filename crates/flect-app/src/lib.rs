@@ -3,5 +3,5 @@
 mod agent;
 mod evidence;
 
-pub use agent::{AgentService, AgentWorkflowError};
+pub use agent::{AgentService, AgentWorkflowError, CleanupOptions, CleanupReport};
 pub use evidence::{EvidenceError, sanitize_verdict_evidence, validate_verdict_evidence};

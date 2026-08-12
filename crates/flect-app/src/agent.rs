@@ -2,7 +2,7 @@ use std::fs;
 use std::hash::{DefaultHasher, Hash, Hasher};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use flect_core::{
     BlindAgentJob, BlindAgentSubmission, BlindBundle, BlindGuard, Config, ContextBuilder,
@@ -49,6 +49,8 @@ pub enum AgentWorkflowError {
     UnavailableScope(String),
     #[error("agent state is invalid: {0}")]
     InvalidState(String),
+    #[error("agent workspace ownership could not be established for {0}")]
+    UnsafeCleanup(String),
     #[error("submitted verdict failed trusted validation: {0}")]
     Evidence(#[from] EvidenceError),
 }
@@ -56,6 +58,23 @@ pub enum AgentWorkflowError {
 pub struct AgentService {
     repository: GitRepository,
     workspace_root: PathBuf,
+    cleanup_on_complete: bool,
+}
+
+/// Selection for explicit workspace cleanup.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct CleanupOptions {
+    pub dry_run: bool,
+    pub include_all: bool,
+    pub older_than_hours: Option<u64>,
+}
+
+/// Bounded cleanup result, suitable for CLI and MCP reporting.
+#[derive(Debug, Serialize)]
+pub struct CleanupReport {
+    pub dry_run: bool,
+    pub deleted: Vec<String>,
+    pub retained: Vec<String>,
 }
 
 impl AgentService {
@@ -67,7 +86,15 @@ impl AgentService {
     pub fn discover(start: &Path) -> Result<Self, AgentWorkflowError> {
         let repository = GitRepository::discover(start)
             .map_err(|error| AgentWorkflowError::Repository(error.to_string()))?;
-        Self::with_workspace_root(repository, std::env::temp_dir().join("flect-agent-jobs"))
+        let cleanup_on_complete = Config::load(&repository.root().join("flect.toml"))
+            .map_err(|error| AgentWorkflowError::Configuration(error.to_string()))?
+            .agent
+            .cleanup_on_complete;
+        Self::with_workspace_root_and_cleanup(
+            repository,
+            std::env::temp_dir().join("flect-agent-jobs"),
+            cleanup_on_complete,
+        )
     }
 
     /// Creates a service with an explicit workspace root, primarily for embedding and tests.
@@ -79,6 +106,19 @@ impl AgentService {
         repository: GitRepository,
         workspace_root: PathBuf,
     ) -> Result<Self, AgentWorkflowError> {
+        Self::with_workspace_root_and_cleanup(repository, workspace_root, true)
+    }
+
+    /// Creates a service with an explicit cleanup policy, primarily for embedding and tests.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the workspace is unsafe or cannot be resolved.
+    pub fn with_workspace_root_and_cleanup(
+        repository: GitRepository,
+        workspace_root: PathBuf,
+        cleanup_on_complete: bool,
+    ) -> Result<Self, AgentWorkflowError> {
         let repository_root = canonical_existing(repository.root())?;
         let workspace = resolve_with_missing(&workspace_root)?;
         if workspace.starts_with(&repository_root) {
@@ -87,6 +127,7 @@ impl AgentService {
         Ok(Self {
             repository,
             workspace_root,
+            cleanup_on_complete,
         })
     }
 
@@ -212,6 +253,9 @@ impl AgentService {
             .echoed_spec
             .clone()
             .ok_or_else(|| AgentWorkflowError::InvalidJobState(blind_job_id.to_owned()))?;
+        let mut blind = blind;
+        blind.status = BlindStatus::JudgePrepared;
+        self.save_blind_state(&blind)?;
         let run = RunStore::new(self.repository.root())
             .load_run(Some(&blind.job.run_id))
             .map_err(|error| AgentWorkflowError::RunState(error.to_string()))?;
@@ -280,7 +324,69 @@ impl AgentService {
             .map_err(|error| AgentWorkflowError::RunState(error.to_string()))?;
         state.status = ReconciliationStatus::Completed;
         self.save_reconciliation_state(&state)?;
+        let mut blind = self.load_blind_state(&state.job.blind_job_id)?;
+        blind.status = BlindStatus::Completed;
+        self.save_blind_state(&blind)?;
+        if self.cleanup_on_complete {
+            self.remove_owned_workspace(&blind.job.job_id)?;
+        }
         Ok(record)
+    }
+
+    /// Removes only verified Flect-owned job directories.
+    ///
+    /// Completed jobs are eligible by default. `include_all` intentionally discards
+    /// unfinished forensic state; `older_than_hours` selects stale workspaces.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when state cannot be read or a candidate fails ownership checks.
+    pub fn cleanup(&self, options: CleanupOptions) -> Result<CleanupReport, AgentWorkflowError> {
+        let state_root = self.repository.root().join(".flect/agent/blind");
+        if !state_root.exists() {
+            return Ok(CleanupReport {
+                dry_run: options.dry_run,
+                deleted: Vec::new(),
+                retained: Vec::new(),
+            });
+        }
+        let cutoff = options
+            .older_than_hours
+            .map(|hours| SystemTime::now() - Duration::from_secs(hours.saturating_mul(3600)));
+        let mut report = CleanupReport {
+            dry_run: options.dry_run,
+            deleted: Vec::new(),
+            retained: Vec::new(),
+        };
+        for entry in
+            fs::read_dir(&state_root).map_err(|source| workspace_error(&state_root, source))?
+        {
+            let path = entry
+                .map_err(|source| workspace_error(&state_root, source))?
+                .path();
+            let Some(job_id) = path.file_stem().and_then(|name| name.to_str()) else {
+                continue;
+            };
+            if validate_job_id(job_id).is_err() {
+                continue;
+            }
+            let state = self.load_blind_state(job_id)?;
+            let stale_workspace = cutoff.is_some_and(|cutoff| {
+                fs::metadata(&state.job.workspace)
+                    .ok()
+                    .and_then(|metadata| metadata.modified().ok())
+                    .is_some_and(|modified| modified < cutoff)
+            });
+            if state.status == BlindStatus::Completed || options.include_all || stale_workspace {
+                let removed = options.dry_run || self.remove_owned_workspace(job_id)?;
+                if removed {
+                    report.deleted.push(job_id.to_owned());
+                }
+            } else {
+                report.retained.push(job_id.to_owned());
+            }
+        }
+        Ok(report)
     }
 
     fn build_bundle(
@@ -348,6 +454,32 @@ impl AgentService {
             .join(format!("{job_id}.json")))
     }
 
+    fn remove_owned_workspace(&self, job_id: &str) -> Result<bool, AgentWorkflowError> {
+        validate_job_id(job_id)?;
+        let repository_root = canonical_existing(self.repository.root())?;
+        let workspace_root = canonical_existing(&self.workspace_root)?;
+        if workspace_root.starts_with(&repository_root) {
+            return Err(AgentWorkflowError::UnsafeWorkspace);
+        }
+        let workspace = workspace_root.join(job_id);
+        if !workspace.exists() {
+            return Ok(false);
+        }
+        let canonical = canonical_existing(&workspace)?;
+        if canonical != workspace
+            || !canonical.starts_with(&workspace_root)
+            || canonical.parent() != Some(workspace_root.as_path())
+        {
+            return Err(AgentWorkflowError::UnsafeCleanup(
+                workspace.display().to_string(),
+            ));
+        }
+        #[cfg(windows)]
+        make_writable(&canonical)?;
+        fs::remove_dir_all(&canonical).map_err(|source| workspace_error(&canonical, source))?;
+        Ok(true)
+    }
+
     fn reconciliation_state_path(&self, job_id: &str) -> Result<PathBuf, AgentWorkflowError> {
         validate_job_id(job_id)?;
         Ok(self
@@ -395,6 +527,10 @@ struct BlindState {
 enum BlindStatus {
     Prepared,
     EchoAccepted,
+    JudgePrepared,
+    Completed,
+    Failed,
+    Abandoned,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -412,6 +548,8 @@ struct ReconciliationState {
 enum ReconciliationStatus {
     Prepared,
     Completed,
+    Failed,
+    Abandoned,
 }
 
 fn strict_schema<T: JsonSchema>() -> Result<Value, AgentWorkflowError> {
@@ -470,6 +608,27 @@ fn write_readonly(path: &Path, bytes: &[u8]) -> Result<(), AgentWorkflowError> {
         .permissions();
     permissions.set_readonly(true);
     fs::set_permissions(path, permissions).map_err(|source| workspace_error(path, source))
+}
+
+#[cfg(windows)]
+#[allow(clippy::permissions_set_readonly_false)]
+fn make_writable(path: &Path) -> Result<(), AgentWorkflowError> {
+    for entry in fs::read_dir(path).map_err(|source| workspace_error(path, source))? {
+        let path = entry
+            .map_err(|source| workspace_error(path, source))?
+            .path();
+        if path.is_dir() {
+            make_writable(&path)?;
+        } else {
+            let mut permissions = fs::metadata(&path)
+                .map_err(|source| workspace_error(&path, source))?
+                .permissions();
+            permissions.set_readonly(false);
+            fs::set_permissions(&path, permissions)
+                .map_err(|source| workspace_error(&path, source))?;
+        }
+    }
+    Ok(())
 }
 
 fn validate_job_id(job_id: &str) -> Result<(), AgentWorkflowError> {

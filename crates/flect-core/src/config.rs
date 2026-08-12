@@ -43,6 +43,7 @@ pub struct Config {
     pub runner: RunnerConfig,
     pub blind: BlindConfig,
     pub privacy: PrivacyConfig,
+    pub agent: AgentConfig,
     pub ignore: IgnoreConfig,
 }
 
@@ -54,6 +55,7 @@ impl Default for Config {
             runner: RunnerConfig::default(),
             blind: BlindConfig::default(),
             privacy: PrivacyConfig::default(),
+            agent: AgentConfig::default(),
             ignore: IgnoreConfig::default(),
         }
     }
@@ -148,6 +150,21 @@ pub struct PrivacyConfig {
     pub respect_gitignore: bool,
 }
 
+/// Privacy-first retention controls for Codex-native agent workspaces.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct AgentConfig {
+    pub cleanup_on_complete: bool,
+}
+
+impl Default for AgentConfig {
+    fn default() -> Self {
+        Self {
+            cleanup_on_complete: true,
+        }
+    }
+}
+
 impl Default for PrivacyConfig {
     fn default() -> Self {
         Self {
@@ -238,6 +255,9 @@ strip_commit_messages = true
 
 [privacy]
 respect_gitignore = true
+
+[agent]
+cleanup_on_complete = true
 
 [ignore]
 patterns = []

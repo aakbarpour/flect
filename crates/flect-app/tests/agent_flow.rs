@@ -2,7 +2,7 @@ use std::fs;
 use std::path::Path;
 use std::process::Command;
 
-use flect_app::{AgentService, AgentWorkflowError};
+use flect_app::{AgentService, AgentWorkflowError, CleanupOptions};
 use flect_core::{
     AgentModelSelection, Alignment, BlindAgentSubmission, EchoedSpec, Evidence, GitRepository,
     IntendedSpec, RecommendedAction, ReconciliationAgentSubmission, RunRecord, RunStore, TaskInput,
@@ -25,6 +25,7 @@ fn complete_agent_handoff_is_blind_validated_and_persisted() {
     .unwrap();
 
     let blind = service.prepare_blind(None, None).unwrap();
+    let blind_workspace = blind.workspace.clone();
     let serialized = serde_json::to_string(&blind).unwrap();
     for forbidden in [
         TASK_SENTINEL,
@@ -94,6 +95,91 @@ fn complete_agent_handoff_is_blind_validated_and_persisted() {
             .unwrap(),
         record
     );
+    assert!(!Path::new(&blind_workspace).exists());
+}
+
+#[test]
+fn cleanup_retains_unfinished_jobs_and_removes_only_owned_completed_jobs() {
+    let repository = fixture_repository();
+    let workspace = tempfile::tempdir().unwrap();
+    let jobs = workspace.path().join("jobs");
+    let sibling = workspace.path().join("unrelated");
+    fs::create_dir(&sibling).unwrap();
+    fs::write(sibling.join("keep.txt"), "keep").unwrap();
+    let service = AgentService::with_workspace_root_and_cleanup(
+        GitRepository::discover(repository.path()).unwrap(),
+        jobs,
+        false,
+    )
+    .unwrap();
+    let blind = service.prepare_blind(None, None).unwrap();
+
+    let report = service.cleanup(CleanupOptions::default()).unwrap();
+    assert!(report.deleted.is_empty());
+    assert_eq!(report.retained, vec![blind.job_id.clone()]);
+    assert!(Path::new(&blind.workspace).exists());
+
+    let dry_run = service
+        .cleanup(flect_app::CleanupOptions {
+            dry_run: true,
+            include_all: true,
+            older_than_hours: None,
+        })
+        .unwrap();
+    assert_eq!(dry_run.deleted, vec![blind.job_id.clone()]);
+    assert!(Path::new(&blind.workspace).exists());
+
+    let deleted = service
+        .cleanup(flect_app::CleanupOptions {
+            dry_run: false,
+            include_all: true,
+            older_than_hours: None,
+        })
+        .unwrap();
+    assert_eq!(deleted.deleted, vec![blind.job_id.clone()]);
+    assert!(!Path::new(&blind.workspace).exists());
+    assert!(sibling.join("keep.txt").exists());
+    assert!(
+        service
+            .cleanup(flect_app::CleanupOptions {
+                dry_run: false,
+                include_all: true,
+                older_than_hours: None,
+            })
+            .unwrap()
+            .deleted
+            .is_empty()
+    );
+}
+
+#[cfg(windows)]
+#[test]
+fn cleanup_rejects_workspace_symlink_escape() {
+    let repository = fixture_repository();
+    let workspace = tempfile::tempdir().unwrap();
+    let jobs = workspace.path().join("jobs");
+    let service = AgentService::with_workspace_root_and_cleanup(
+        GitRepository::discover(repository.path()).unwrap(),
+        jobs.clone(),
+        false,
+    )
+    .unwrap();
+    let blind = service.prepare_blind(None, None).unwrap();
+    fs::remove_dir_all(&blind.workspace).unwrap();
+    let outside = tempfile::tempdir().unwrap();
+    let result = std::os::windows::fs::symlink_dir(outside.path(), jobs.join(&blind.job_id));
+    if result.is_err() {
+        return;
+    }
+    assert!(matches!(
+        service.cleanup(flect_app::CleanupOptions {
+            dry_run: false,
+            include_all: true,
+            older_than_hours: None,
+        }),
+        Err(AgentWorkflowError::UnsafeCleanup(_))
+    ));
+    assert!(outside.path().exists());
 }
 
 #[test]

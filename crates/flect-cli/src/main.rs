@@ -165,6 +165,18 @@ enum AgentCommand {
         #[arg(long, value_name = "PATH")]
         submission: PathBuf,
     },
+    /// Delete Flect-owned completed workspaces, or explicitly selected stale jobs.
+    Cleanup {
+        /// Report eligible workspaces without deleting them.
+        #[arg(long)]
+        dry_run: bool,
+        /// Include unfinished jobs. Use only when intentionally discarding forensic state.
+        #[arg(long)]
+        all: bool,
+        /// Include jobs older than this many hours.
+        #[arg(long, value_name = "HOURS")]
+        older_than: Option<u64>,
+    },
 }
 
 #[tokio::main]

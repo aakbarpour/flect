@@ -476,6 +476,19 @@ fn agent(command: &AgentCommand, _json_output: bool) -> Result<()> {
             let submission = read_json_file(submission)?;
             serde_json::to_value(service.submit_verdict(submission).map_err(to_report)?)
         }
+        AgentCommand::Cleanup {
+            dry_run,
+            all,
+            older_than,
+        } => serde_json::to_value(
+            service
+                .cleanup(flect_app::CleanupOptions {
+                    dry_run: *dry_run,
+                    include_all: *all,
+                    older_than_hours: *older_than,
+                })
+                .map_err(to_report)?,
+        ),
     }
     .into_diagnostic()?;
     print_json(&value)
