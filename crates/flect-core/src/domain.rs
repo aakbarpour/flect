@@ -264,16 +264,23 @@ pub struct Verdict {
 }
 
 /// Safe, persisted observability for one semantic model stage.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct ModelCallRecord {
     pub stage: String,
+    #[serde(default)]
+    pub attempt: u32,
+    #[serde(default)]
+    pub accepted: bool,
     pub provider: String,
     pub model: String,
     pub latency_ms: u64,
     pub input_tokens: Option<u64>,
     pub cached_input_tokens: Option<u64>,
     pub output_tokens: Option<u64>,
+    pub estimated_cost_usd: Option<f64>,
+    pub pricing_version: Option<String>,
+    pub escalation_reason: Option<String>,
 }
 
 /// Persisted state captured before implementation begins.

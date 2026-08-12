@@ -99,6 +99,8 @@ pub struct RunnerConfig {
     pub timeout_seconds: u64,
     pub escalate_on_uncertain: bool,
     pub confidence_threshold: f64,
+    pub complexity_file_threshold: usize,
+    pub complexity_byte_threshold: u64,
 }
 
 impl Default for RunnerConfig {
@@ -114,6 +116,8 @@ impl Default for RunnerConfig {
             timeout_seconds: 120,
             escalate_on_uncertain: true,
             confidence_threshold: 0.65,
+            complexity_file_threshold: 12,
+            complexity_byte_threshold: 200_000,
         }
     }
 }
@@ -224,6 +228,8 @@ reasoning_effort = "medium"
 timeout_seconds = 120
 escalate_on_uncertain = true
 confidence_threshold = 0.65
+complexity_file_threshold = 12
+complexity_byte_threshold = 200000
 
 [blind]
 strip_git_metadata = true
@@ -257,6 +263,18 @@ patterns = []
         if self.runner.timeout_seconds == 0 {
             return Err(ConfigError::Invalid {
                 field: "runner.timeout_seconds",
+                message: "must be at least 1".to_owned(),
+            });
+        }
+        if self.runner.complexity_file_threshold == 0 {
+            return Err(ConfigError::Invalid {
+                field: "runner.complexity_file_threshold",
+                message: "must be at least 1".to_owned(),
+            });
+        }
+        if self.runner.complexity_byte_threshold == 0 {
+            return Err(ConfigError::Invalid {
+                field: "runner.complexity_byte_threshold",
                 message: "must be at least 1".to_owned(),
             });
         }

@@ -39,4 +39,4 @@ Documents carry a `version` field. A run stores the repository root, immutable b
 
 ## Deliberate limits
 
-Repository-copy context, model repair loops, cheap-model escalation, Skills, evaluation execution, MCP, CI mode, and release packaging are later milestones. No empty interfaces or placeholder crates exist for them.
+Repository-copy context, model repair loops beyond one bounded fallback, Skills, evaluation execution, MCP, CI mode, and release packaging are later milestones. No empty interfaces or placeholder crates exist for them.

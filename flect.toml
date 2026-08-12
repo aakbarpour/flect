@@ -17,6 +17,8 @@ reasoning_effort = "medium"
 timeout_seconds = 120
 escalate_on_uncertain = true
 confidence_threshold = 0.65
+complexity_file_threshold = 12
+complexity_byte_threshold = 200000
 
 [blind]
 strip_git_metadata = true
