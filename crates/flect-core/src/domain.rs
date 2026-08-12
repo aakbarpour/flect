@@ -171,6 +171,49 @@ pub struct BlindBundle {
     pub blindness_report: BlindnessReport,
 }
 
+/// One affected source file, with optional descriptive symbol detail.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct AffectedScope {
+    /// Exact path from Flect's visible patch or context files.
+    pub file: String,
+    /// Optional function, class, or other descriptive scope within `file`.
+    #[serde(default)]
+    pub symbol: Option<String>,
+}
+
+impl<'de> Deserialize<'de> for AffectedScope {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        #[derive(Deserialize)]
+        #[serde(untagged)]
+        enum Wire {
+            Structured {
+                file: String,
+                #[serde(default)]
+                symbol: Option<String>,
+            },
+            Legacy(String),
+        }
+        match Wire::deserialize(deserializer)? {
+            Wire::Structured { file, symbol } => Ok(Self { file, symbol }),
+            // Legacy persisted records are retained verbatim and still undergo file validation.
+            Wire::Legacy(file) => Ok(Self { file, symbol: None }),
+        }
+    }
+}
+
+impl fmt::Display for AffectedScope {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match &self.symbol {
+            Some(symbol) => write!(formatter, "{}: {symbol}", self.file),
+            None => formatter.write_str(&self.file),
+        }
+    }
+}
+
 /// The apparent behavior independently reconstructed from a patch.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(default, deny_unknown_fields)]
@@ -178,7 +221,7 @@ pub struct EchoedSpec {
     pub apparent_objective: String,
     pub behavior_before: Vec<String>,
     pub behavior_after: Vec<String>,
-    pub affected_scope: Vec<String>,
+    pub affected_scope: Vec<AffectedScope>,
     pub side_effects: Vec<String>,
     pub assumptions: Vec<String>,
     pub uncertainties: Vec<String>,
@@ -219,6 +262,9 @@ pub struct Evidence {
     pub line_end: Option<u32>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub patch_hunk: Option<String>,
+    /// Stable IDs of negative findings supported by this evidence.
+    #[serde(default)]
+    pub finding_ids: Vec<String>,
     pub description: String,
     pub confidence: f64,
 }
@@ -374,6 +420,8 @@ pub struct ReconciliationAgentJob {
     pub intended_spec: IntendedSpec,
     pub echoed_spec: EchoedSpec,
     pub available_evidence: Vec<ChangedFile>,
+    /// Machine-readable, fail-closed rules and permitted patch locations for evidence.
+    pub evidence_contract: serde_json::Value,
     pub verdict_schema: serde_json::Value,
 }
 

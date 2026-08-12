@@ -978,6 +978,7 @@ fn deterministic_echo(bundle: &BlindBundle) -> EchoedSpec {
         .files
         .iter()
         .map(|file| file.path.clone())
+        .map(|file| flect_core::AffectedScope { file, symbol: None })
         .collect::<Vec<_>>();
     EchoedSpec {
         apparent_objective: if affected_scope.is_empty() {
@@ -986,7 +987,11 @@ fn deterministic_echo(bundle: &BlindBundle) -> EchoedSpec {
             format!(
                 "Change {} file(s): {}",
                 affected_scope.len(),
-                affected_scope.join(", ")
+                affected_scope
+                    .iter()
+                    .map(ToString::to_string)
+                    .collect::<Vec<_>>()
+                    .join(", ")
             )
         },
         behavior_after,
@@ -1137,7 +1142,10 @@ mod tests {
         let echoed = EchoedSpec {
             apparent_objective: "Add safe behavior".to_owned(),
             behavior_after: vec!["Validates input".to_owned()],
-            affected_scope: vec!["src/lib.rs".to_owned()],
+            affected_scope: vec![flect_core::AffectedScope {
+                file: "src/lib.rs".to_owned(),
+                symbol: None,
+            }],
             confidence: 0.9,
             ..EchoedSpec::default()
         };
@@ -1152,6 +1160,7 @@ mod tests {
             "evidence": [{
                 "file": null, "line_start": null, "line_end": null,
                 "patch_hunk": null, "description": "Patch validates input",
+                "finding_ids": [],
                 "confidence": 0.9
             }],
             "confidence": 0.9,
@@ -1224,6 +1233,7 @@ mod tests {
                 line_start: Some(999),
                 line_end: Some(1000),
                 patch_hunk: Some("fabricated".to_owned()),
+                finding_ids: Vec::new(),
                 description: "Unrelated claim".to_owned(),
                 confidence: 0.8,
             }],
@@ -1237,7 +1247,7 @@ mod tests {
             verdict
                 .evidence
                 .iter()
-                .any(|evidence| evidence.description == "Missing validation")
+                .any(|evidence| evidence.description == "missing_requirements/0")
         );
     }
 

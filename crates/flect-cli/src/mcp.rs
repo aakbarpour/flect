@@ -2,7 +2,7 @@
 
 use std::collections::BTreeSet;
 use std::io::{self, BufRead, Write};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use flect_app::AgentService;
@@ -29,15 +29,39 @@ pub fn run() -> Result<()> {
     let executable = std::env::current_exe()
         .into_diagnostic()
         .wrap_err("could not locate the Flect executable")?;
-    let working_directory = std::env::current_dir()
-        .into_diagnostic()
-        .wrap_err("could not determine the MCP working directory")?;
+    let working_directory = repository_context()?;
     serve(
         io::stdin().lock(),
         io::stdout().lock(),
         &executable,
         &working_directory,
     )
+}
+
+fn repository_context() -> Result<PathBuf> {
+    let configured = std::env::var_os("FLECT_MCP_REPOSITORY_ROOT").map_or(
+        std::env::current_dir()
+            .into_diagnostic()
+            .wrap_err("could not determine the MCP working directory")?,
+        PathBuf::from,
+    );
+    let canonical = configured
+        .canonicalize()
+        .into_diagnostic()
+        .wrap_err_with(|| {
+            format!(
+                "MCP repository context does not exist: {}",
+                configured.display()
+            )
+        })?;
+    let repository = GitRepository::discover(&canonical)
+        .into_diagnostic()
+        .wrap_err("MCP repository context must be a Git worktree")?;
+    repository
+        .root()
+        .canonicalize()
+        .into_diagnostic()
+        .wrap_err("could not canonicalize MCP repository root")
 }
 
 fn serve(
@@ -485,7 +509,13 @@ fn reject_unknown(
     allowed: &[&str],
 ) -> std::result::Result<(), String> {
     let allowed = allowed.iter().copied().collect::<BTreeSet<_>>();
-    if let Some(key) = object.keys().find(|key| !allowed.contains(key.as_str())) {
+    // Codex may attach transport metadata to otherwise valid MCP calls. It is
+    // deliberately not part of any Flect contract and must not affect input
+    // validation or persisted state.
+    if let Some(key) = object
+        .keys()
+        .find(|key| key.as_str() != "_meta" && !allowed.contains(key.as_str()))
+    {
         return Err(format!("unknown parameter `{key}`"));
     }
     Ok(())

@@ -76,7 +76,7 @@ fn stdio_session_discovers_tools_and_persists_strict_blind_results() {
     }));
     assert_eq!(invalid["error"]["code"], -32602);
 
-    let started = client.call(4, "flect_start", &json!({"task": SENTINEL}));
+    let started = client.call(4, "flect_start", &start_arguments());
     assert_eq!(started["result"]["isError"], false);
     fs::write(repository.path().join("app.txt"), "new behavior\n").unwrap();
 
@@ -116,6 +116,68 @@ fn stdio_session_discovers_tools_and_persists_strict_blind_results() {
     client.finish();
 }
 
+#[test]
+fn configured_repository_context_overrides_mcp_process_directory() {
+    let repository = initialized_fixture();
+    let process_directory = tempfile::tempdir().unwrap();
+    let direct_root = git_output(repository.path(), ["rev-parse", "--show-toplevel"]);
+
+    let mut client =
+        McpClient::spawn_with_repository_context(process_directory.path(), repository.path());
+    initialize(&mut client);
+
+    let started = client.call(
+        1,
+        "flect_start",
+        &json!({"task": "discover the configured repository"}),
+    );
+    assert_eq!(started["result"]["isError"], false);
+    let mcp_root = started["result"]["structuredContent"]["repository_root"]
+        .as_str()
+        .unwrap();
+    assert_eq!(Path::new(mcp_root).canonicalize().unwrap(), direct_root);
+    assert!(repository.path().join(".flect").is_dir());
+    assert!(!process_directory.path().join(".flect").exists());
+    client.finish();
+}
+
+fn initialized_fixture() -> tempfile::TempDir {
+    let repository = tempfile::tempdir().unwrap();
+    git(repository.path(), ["init", "-b", "main"]);
+    git(
+        repository.path(),
+        ["config", "user.email", "tests@flect.local"],
+    );
+    git(repository.path(), ["config", "user.name", "Flect Tests"]);
+    fs::write(repository.path().join("app.txt"), "old behavior\n").unwrap();
+    git(repository.path(), ["add", "app.txt"]);
+    git(repository.path(), ["commit", "-m", "base"]);
+    assert!(
+        Command::new(env!("CARGO_BIN_EXE_flect"))
+            .current_dir(repository.path())
+            .arg("init")
+            .status()
+            .unwrap()
+            .success()
+    );
+    git(repository.path(), ["add", ".gitignore", "flect.toml"]);
+    git(repository.path(), ["commit", "-m", "configure flect"]);
+    repository
+}
+
+fn initialize(client: &mut McpClient) {
+    let initialized = client.request(&json!({
+        "jsonrpc": "2.0", "id": 1, "method": "initialize",
+        "params": {"protocolVersion": "2025-11-25"}
+    }));
+    assert_eq!(initialized["result"]["serverInfo"]["name"], "flect");
+    client.notify(&json!({"jsonrpc": "2.0", "method": "notifications/initialized"}));
+}
+
+fn start_arguments() -> Value {
+    json!({"task": SENTINEL, "_meta": {"progressToken": "codex"}})
+}
+
 fn exercise_agent_handoff(client: &mut McpClient) -> Value {
     let semantic_error = client.call(
         7,
@@ -142,7 +204,7 @@ fn exercise_agent_handoff(client: &mut McpClient) -> Value {
                 "apparent_objective": "Change app behavior",
                 "behavior_before": ["The app used old behavior"],
                 "behavior_after": ["The app uses new behavior"],
-                "affected_scope": ["app.txt"],
+                "affected_scope": [{"file": "app.txt", "symbol": null}],
                 "side_effects": [], "assumptions": [], "uncertainties": [], "confidence": 0.9
             },
             "model": "test-verifier", "model_selection": "explicit"
@@ -191,7 +253,17 @@ struct McpClient {
 
 impl McpClient {
     fn spawn(directory: &Path) -> Self {
-        let mut child = Command::new(env!("CARGO_BIN_EXE_flect"))
+        Self::spawn_with_command(Command::new(env!("CARGO_BIN_EXE_flect")), directory)
+    }
+
+    fn spawn_with_repository_context(process_directory: &Path, repository: &Path) -> Self {
+        let mut command = Command::new(env!("CARGO_BIN_EXE_flect"));
+        command.env("FLECT_MCP_REPOSITORY_ROOT", repository);
+        Self::spawn_with_command(command, process_directory)
+    }
+
+    fn spawn_with_command(mut command: Command, directory: &Path) -> Self {
+        let mut child = command
             .current_dir(directory)
             .arg("mcp")
             .stdin(Stdio::piped())
@@ -235,6 +307,19 @@ impl McpClient {
         drop(self.input.take());
         assert!(self.child.wait().unwrap().success());
     }
+}
+
+fn git_output<const N: usize>(directory: &Path, arguments: [&str; N]) -> std::path::PathBuf {
+    let output = Command::new("git")
+        .arg("-C")
+        .arg(directory)
+        .args(arguments)
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+    Path::new(std::str::from_utf8(&output.stdout).unwrap().trim())
+        .canonicalize()
+        .unwrap()
 }
 
 fn git<const N: usize>(directory: &Path, arguments: [&str; N]) {
