@@ -152,6 +152,7 @@ fn cleanup_retains_unfinished_jobs_and_removes_only_owned_completed_jobs() {
     );
 }
 
+#[cfg(windows)]
 #[test]
 fn cleanup_rejects_workspace_symlink_escape() {
     let repository = fixture_repository();
