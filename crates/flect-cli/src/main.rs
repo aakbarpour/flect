@@ -55,6 +55,9 @@ enum Command {
         /// Override the configured context policy.
         #[arg(long)]
         context: Option<ContextPolicy>,
+        /// Show the exact request boundary and runner selection without invoking a model.
+        #[arg(long)]
+        dry_run: bool,
     },
     /// Reconstruct what the current patch appears to do without an original task.
     Echo {

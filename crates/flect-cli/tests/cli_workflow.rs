@@ -24,6 +24,14 @@ fn offline_workflow_persists_a_blind_verdict() {
     ));
     fs::write(repository.path().join("app.txt"), "new behavior\n").unwrap();
 
+    let dry_run = flect(repository.path(), ["--json", "verify", "--dry-run"]);
+    assert_success(&dry_run);
+    let dry_run: serde_json::Value = serde_json::from_slice(&dry_run.stdout).unwrap();
+    assert_eq!(dry_run["request_sent"], false);
+    assert_eq!(dry_run["runner"]["provider"], "mock");
+    assert_eq!(dry_run["context_policy"], "focused");
+    assert_eq!(dry_run["included"]["patch_files"][0], "app.txt");
+
     let inspection = flect(repository.path(), ["--json", "inspect"]);
     assert_success(&inspection);
     let inspection: serde_json::Value = serde_json::from_slice(&inspection.stdout).unwrap();

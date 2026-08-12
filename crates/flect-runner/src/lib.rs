@@ -40,13 +40,13 @@ impl RequestPurpose {
     fn instruction(self) -> &'static str {
         match self {
             Self::ReconstructPatchIntent => {
-                "Reconstruct the apparent behavioral intent using only the supplied implementation evidence. Return factual structured output and preserve uncertainty."
+                "You are an independent blind patch verifier. Reconstruct only what the supplied patch and sanitized context demonstrate. You have no access to the original task, forward specification, conversation, branch name, commit messages, or issue metadata. Never infer or claim access to them. Distinguish behavior before from behavior after, identify affected scope and side effects, and preserve uncertainty. Do not invent file names, line numbers, or evidence."
             }
             Self::AnalyzeForwardIntent => {
-                "Convert the supplied task into a faithful implementation specification. Do not invent requirements that are not present."
+                "Convert only the supplied original task into a faithful implementation specification. Preserve explicit requirements, constraints, non-goals, acceptance criteria, expected scope, and ambiguities. Do not inspect implementation evidence and do not invent requirements."
             }
             Self::ReconcileIntent => {
-                "Compare the supplied intended and reconstructed specifications. Return a conservative evidence-backed alignment verdict."
+                "Compare the intended specification with the independently reconstructed specification. Classify alignment conservatively as SAME, PARTIAL, DIFFERENT, or UNCERTAIN. Every negative finding must have a corresponding evidence entry. Use a file, line range, or patch hunk only when it appears verbatim in available_evidence; otherwise leave location fields null and explain the evidentiary limitation. Never fabricate evidence."
             }
         }
     }

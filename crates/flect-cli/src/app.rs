@@ -4,17 +4,21 @@ use std::fs;
 use std::io::{self, IsTerminal, Read, Write};
 use std::path::Path;
 use std::process::Command as ProcessCommand;
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use flect_core::{
-    BlindBundle, BlindGuard, Config, ContextBuilder, ContextPolicy, EchoedSpec, FileStatus,
-    GitRepository, IntendedSpec, RunRecord, RunStore, RunnerKind, TaskInput, VerificationRecord,
-    reconcile,
+    BlindBundle, BlindGuard, Config, ContextBuilder, ContextPolicy, EchoedSpec, Evidence,
+    FileStatus, GitRepository, IntendedSpec, ModelCallRecord, RunRecord, RunStore, RunnerKind,
+    TaskInput, Verdict, VerificationRecord, reconcile,
 };
-use flect_runner::{AgentRequest, AgentRunner, MockRunner, RequestPurpose};
+use flect_runner::{
+    AgentRequest, AgentRunner, MockRunner, OpenAiResponsesConfig, OpenAiResponsesRunner,
+    RequestPurpose, RunnerMetadata,
+};
 use miette::{IntoDiagnostic, Result, WrapErr, miette};
-use schemars::schema_for;
-use serde_json::json;
+use schemars::{JsonSchema, schema_for};
+use serde::de::DeserializeOwned;
+use serde_json::{Value, json};
 
 use crate::Command;
 use crate::report;
@@ -26,17 +30,30 @@ pub async fn run(command: Command, json_output: bool) -> Result<()> {
             task,
             task_file,
             spec_file,
-        } => start(
-            task,
-            task_file.as_deref(),
-            spec_file.as_deref(),
-            json_output,
-        ),
+        } => {
+            start(
+                task,
+                task_file.as_deref(),
+                spec_file.as_deref(),
+                json_output,
+            )
+            .await
+        }
         Command::Verify {
             run,
             echoed_spec,
             context,
-        } => verify(run.as_deref(), echoed_spec.as_deref(), context, json_output).await,
+            dry_run,
+        } => {
+            verify(
+                run.as_deref(),
+                echoed_spec.as_deref(),
+                context,
+                dry_run,
+                json_output,
+            )
+            .await
+        }
         Command::Echo {
             revision,
             echoed_spec,
@@ -99,7 +116,7 @@ fn init(json_output: bool) -> Result<()> {
     Ok(())
 }
 
-fn start(
+async fn start(
     task_argument: Option<String>,
     task_file: Option<&Path>,
     spec_file: Option<&Path>,
@@ -107,7 +124,6 @@ fn start(
 ) -> Result<()> {
     let repository = discover_current()?;
     let config = load_config(repository.root())?;
-    ensure_mock_provider(&config)?;
     let base_revision = repository.head_revision().map_err(to_report)?;
     let task = TaskInput {
         text: read_task(task_argument, task_file)?,
@@ -115,9 +131,21 @@ fn start(
     if task.text.trim().is_empty() {
         return Err(miette!("the original task cannot be empty"));
     }
-    let intended_spec = match spec_file {
-        Some(path) => read_json_file(path)?,
-        None => IntendedSpec::from_task(&task),
+    let (intended_spec, model_calls) = match spec_file {
+        Some(path) => (read_json_file(path)?, Vec::new()),
+        None if config.runner.kind == RunnerKind::Mock => {
+            (IntendedSpec::from_task(&task), Vec::new())
+        }
+        None => {
+            let runner = api_runner(&config)?;
+            let (spec, metadata) = generate_typed(
+                &runner,
+                RequestPurpose::AnalyzeForwardIntent,
+                serde_json::to_value(&task).into_diagnostic()?,
+            )
+            .await?;
+            (spec, vec![model_call("forward", metadata)])
+        }
     };
     let now = unix_millis()?;
     let run = RunRecord {
@@ -127,6 +155,7 @@ fn start(
         base_revision,
         task,
         intended_spec,
+        model_calls,
         created_unix_ms: now,
     };
     RunStore::new(repository.root())
@@ -145,11 +174,11 @@ async fn verify(
     run_id: Option<&str>,
     echoed_spec_path: Option<&Path>,
     context: Option<ContextPolicy>,
+    dry_run: bool,
     json_output: bool,
 ) -> Result<()> {
     let repository = discover_current()?;
     let mut config = load_config(repository.root())?;
-    ensure_mock_provider(&config)?;
     if let Some(context) = context {
         config.verification.context = context;
     }
@@ -164,14 +193,29 @@ async fn verify(
         ));
     }
     let bundle = build_bundle(&repository, &config, &run.base_revision)?;
-    let echoed = reconstruct(&bundle, echoed_spec_path).await?;
-    let verdict = reconcile(&run.intended_spec, &echoed);
+    if dry_run {
+        return verification_dry_run(&config, &bundle, json_output);
+    }
+    let (echoed, backward_metadata) = reconstruct(&config, &bundle, echoed_spec_path).await?;
+    let (mut verdict, reconciliation_metadata) =
+        reconcile_semantically(&config, &run.intended_spec, &echoed, &bundle).await?;
+    validate_evidence(&mut verdict, &bundle);
+    let model_calls = backward_metadata
+        .into_iter()
+        .map(|metadata| model_call("backward", metadata))
+        .chain(
+            reconciliation_metadata
+                .into_iter()
+                .map(|metadata| model_call("reconciliation", metadata)),
+        )
+        .collect();
     let record = VerificationRecord {
         version: 1,
         run_id: run.id,
         bundle,
         echoed_spec: echoed,
         verdict,
+        model_calls,
         verified_unix_ms: unix_millis()?,
     };
     store.save_verification(&record).map_err(to_report)?;
@@ -192,7 +236,6 @@ async fn echo(
 ) -> Result<()> {
     let repository = discover_current()?;
     let mut config = load_config(repository.root())?;
-    ensure_mock_provider(&config)?;
     if let Some(context) = context {
         config.verification.context = context;
     }
@@ -201,9 +244,13 @@ async fn echo(
         None => repository.head_revision().map_err(to_report)?,
     };
     let bundle = build_bundle(&repository, &config, &base)?;
-    let echoed = reconstruct(&bundle, echoed_spec_path).await?;
+    let (echoed, metadata) = reconstruct(&config, &bundle, echoed_spec_path).await?;
     if json_output {
-        print_json(&json!({ "bundle_manifest": bundle.manifest, "echoed_spec": echoed }))?;
+        print_json(&json!({
+            "bundle_manifest": bundle.manifest,
+            "echoed_spec": echoed,
+            "model_call": metadata.map(|value| model_call("backward", value)),
+        }))?;
     } else {
         report::echo(&echoed);
     }
@@ -310,24 +357,239 @@ fn build_bundle(repository: &GitRepository, config: &Config, base: &str) -> Resu
     BlindGuard::build(context, &config.blind).map_err(to_report)
 }
 
-async fn reconstruct(bundle: &BlindBundle, echoed_spec_path: Option<&Path>) -> Result<EchoedSpec> {
-    let response = match echoed_spec_path {
-        Some(path) => read_json_file(path)?,
-        None => deterministic_echo(bundle),
-    };
-    let runner = MockRunner::with_response(&response).map_err(to_report)?;
-    let request = AgentRequest {
-        purpose: RequestPurpose::ReconstructPatchIntent,
-        input: serde_json::to_value(bundle).into_diagnostic()?,
-    };
-    let schema = serde_json::to_value(schema_for!(EchoedSpec)).into_diagnostic()?;
-    let value = runner
+async fn reconstruct(
+    config: &Config,
+    bundle: &BlindBundle,
+    echoed_spec_path: Option<&Path>,
+) -> Result<(EchoedSpec, Option<RunnerMetadata>)> {
+    if let Some(path) = echoed_spec_path {
+        let response: EchoedSpec = read_json_file(path)?;
+        let runner = MockRunner::with_response(&response).map_err(to_report)?;
+        let (echoed, _) = generate_typed(
+            &runner,
+            RequestPurpose::ReconstructPatchIntent,
+            blind_input(bundle)?,
+        )
+        .await?;
+        return Ok((echoed, None));
+    }
+    if config.runner.kind == RunnerKind::Mock {
+        return Ok((deterministic_echo(bundle), None));
+    }
+    let runner = api_runner(config)?;
+    let (echoed, metadata) = generate_typed(
+        &runner,
+        RequestPurpose::ReconstructPatchIntent,
+        blind_input(bundle)?,
+    )
+    .await?;
+    Ok((echoed, Some(metadata)))
+}
+
+async fn reconcile_semantically(
+    config: &Config,
+    intended: &IntendedSpec,
+    echoed: &EchoedSpec,
+    bundle: &BlindBundle,
+) -> Result<(Verdict, Option<RunnerMetadata>)> {
+    if config.runner.kind == RunnerKind::Mock {
+        return Ok((reconcile(intended, echoed), None));
+    }
+    let runner = api_runner(config)?;
+    let input = json!({
+        "intended_spec": intended,
+        "echoed_spec": echoed,
+        "available_evidence": bundle.patch.files,
+    });
+    let (verdict, metadata) =
+        generate_typed(&runner, RequestPurpose::ReconcileIntent, input).await?;
+    Ok((verdict, Some(metadata)))
+}
+
+fn blind_input(bundle: &BlindBundle) -> Result<Value> {
+    serde_json::to_value(bundle)
+        .into_diagnostic()
+        .wrap_err("could not serialize the strict blind verifier bundle")
+}
+
+async fn generate_typed<T>(
+    runner: &dyn AgentRunner,
+    purpose: RequestPurpose,
+    input: Value,
+) -> Result<(T, RunnerMetadata)>
+where
+    T: DeserializeOwned + JsonSchema,
+{
+    let request = AgentRequest { purpose, input };
+    let schema = strict_schema::<T>()?;
+    let output = runner
         .generate_structured(&request, &schema)
         .await
         .map_err(to_report)?;
-    serde_json::from_value(value.value)
+    let value = serde_json::from_value(output.value)
         .into_diagnostic()
-        .wrap_err("runner response did not match the EchoedSpec schema")
+        .wrap_err("runner response did not match the requested domain schema")?;
+    Ok((value, output.metadata))
+}
+
+fn strict_schema<T: JsonSchema>() -> Result<Value> {
+    let mut schema = serde_json::to_value(schema_for!(T)).into_diagnostic()?;
+    make_objects_strict(&mut schema);
+    Ok(schema)
+}
+
+fn make_objects_strict(value: &mut Value) {
+    match value {
+        Value::Object(object) => {
+            object.remove("$schema");
+            if let Some(Value::Object(properties)) = object.get("properties") {
+                let required = properties.keys().cloned().map(Value::String).collect();
+                object.insert("required".to_owned(), Value::Array(required));
+                object.insert("additionalProperties".to_owned(), Value::Bool(false));
+            }
+            for child in object.values_mut() {
+                make_objects_strict(child);
+            }
+        }
+        Value::Array(values) => values.iter_mut().for_each(make_objects_strict),
+        _ => {}
+    }
+}
+
+fn api_runner(config: &Config) -> Result<OpenAiResponsesRunner> {
+    let model = config
+        .runner
+        .model
+        .clone()
+        .ok_or_else(|| miette!("runner.model is required for the API runner"))?;
+    OpenAiResponsesRunner::from_env(OpenAiResponsesConfig {
+        base_url: config.runner.base_url.clone(),
+        api_key_env: config.runner.api_key_env.clone(),
+        model,
+        reasoning_effort: config.runner.reasoning_effort.clone(),
+        timeout: Duration::from_secs(config.runner.timeout_seconds),
+    })
+    .map_err(to_report)
+}
+
+fn model_call(stage: &str, metadata: RunnerMetadata) -> ModelCallRecord {
+    ModelCallRecord {
+        stage: stage.to_owned(),
+        provider: metadata.provider,
+        model: metadata.model,
+        latency_ms: metadata.latency_ms,
+        input_tokens: metadata.usage.input_tokens,
+        cached_input_tokens: metadata.usage.cached_input_tokens,
+        output_tokens: metadata.usage.output_tokens,
+    }
+}
+
+fn verification_dry_run(config: &Config, bundle: &BlindBundle, json_output: bool) -> Result<()> {
+    let value = json!({
+        "dry_run": true,
+        "request_sent": false,
+        "runner": {
+            "kind": config.runner.kind.to_string(),
+            "provider": if config.runner.kind == RunnerKind::Api { "openai-compatible" } else { "mock" },
+            "model": config.runner.model,
+        },
+        "context_policy": bundle.manifest.context_policy,
+        "included": {
+            "patch_files": bundle.manifest.patch_files,
+            "context_files": bundle.manifest.context_files,
+        },
+        "excluded": bundle.manifest.excluded_paths,
+        "blindness_report": bundle.blindness_report,
+    });
+    if json_output {
+        print_json(&value)
+    } else {
+        report::dry_run(&value);
+        Ok(())
+    }
+}
+
+fn validate_evidence(verdict: &mut Verdict, bundle: &BlindBundle) {
+    for evidence in &mut verdict.evidence {
+        validate_evidence_location(evidence, bundle);
+    }
+    let findings = verdict
+        .missing_requirements
+        .iter()
+        .chain(verdict.unrequested_changes.iter())
+        .chain(verdict.violated_constraints.iter())
+        .chain(verdict.potential_side_effects.iter());
+    for finding in findings {
+        if !verdict
+            .evidence
+            .iter()
+            .any(|evidence| evidence.description.contains(finding))
+        {
+            verdict.evidence.push(Evidence {
+                file: None,
+                line_start: None,
+                line_end: None,
+                patch_hunk: None,
+                description: finding.clone(),
+                confidence: verdict.confidence,
+            });
+        }
+    }
+}
+
+fn validate_evidence_location(evidence: &mut Evidence, bundle: &BlindBundle) {
+    let Some(file) = evidence.file.as_deref() else {
+        evidence.line_start = None;
+        evidence.line_end = None;
+        evidence.patch_hunk = None;
+        return;
+    };
+    let Some(changed) = bundle
+        .patch
+        .files
+        .iter()
+        .find(|changed| changed.path == file)
+    else {
+        evidence.file = None;
+        evidence.line_start = None;
+        evidence.line_end = None;
+        evidence.patch_hunk = None;
+        return;
+    };
+    if evidence
+        .patch_hunk
+        .as_deref()
+        .is_some_and(|hunk| !changed.patch.contains(hunk))
+    {
+        evidence.patch_hunk = None;
+    }
+    let valid_lines = evidence
+        .patch_hunk
+        .as_deref()
+        .and_then(new_line_range)
+        .is_some_and(|(first, last)| {
+            matches!(
+                (evidence.line_start, evidence.line_end),
+                (Some(start), Some(end)) if start <= end && start >= first && end <= last
+            )
+        });
+    if !valid_lines {
+        evidence.line_start = None;
+        evidence.line_end = None;
+    }
+}
+
+fn new_line_range(hunk: &str) -> Option<(u32, u32)> {
+    let header = hunk.lines().next()?;
+    let new_range = header
+        .split_whitespace()
+        .find(|part| part.starts_with('+'))?;
+    let (start, count) = new_range[1..]
+        .split_once(',')
+        .map_or((new_range.trim_start_matches('+'), "1"), |parts| parts);
+    let start = start.parse::<u32>().ok()?;
+    let count = count.parse::<u32>().ok()?;
+    (count > 0).then(|| (start, start.saturating_add(count - 1)))
 }
 
 fn deterministic_echo(bundle: &BlindBundle) -> EchoedSpec {
@@ -364,7 +626,7 @@ fn deterministic_echo(bundle: &BlindBundle) -> EchoedSpec {
         behavior_after,
         affected_scope,
         uncertainties: vec![
-            "Milestone 1 has no real verifier; file-level reconstruction is intentionally uncertain"
+            "The offline mock baseline has no semantic verifier; file-level reconstruction is intentionally uncertain"
                 .to_owned(),
         ],
         confidence: 0.35,
@@ -379,17 +641,6 @@ fn discover_current() -> Result<GitRepository> {
 
 fn load_config(root: &Path) -> Result<Config> {
     Config::load(&root.join("flect.toml")).map_err(to_report)
-}
-
-fn ensure_mock_provider(config: &Config) -> Result<()> {
-    if config.runner.kind == RunnerKind::Mock {
-        Ok(())
-    } else {
-        Err(miette!(
-            "runner kind `{}` is configured, but semantic API orchestration is implemented in issue #3; use `mock` for the deterministic pipeline until then",
-            config.runner.kind
-        ))
-    }
 }
 
 fn read_task(argument: Option<String>, path: Option<&Path>) -> Result<String> {
@@ -477,6 +728,7 @@ fn to_report(error: impl std::fmt::Display) -> miette::Report {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use flect_core::{Alignment, RecommendedAction};
 
     #[test]
     fn deterministic_echo_never_claims_confidence() {
@@ -490,5 +742,136 @@ mod tests {
             "blindness_report": { "isolation": "strict", "entries": [], "limitations": [] }
         })).unwrap();
         assert!(deterministic_echo(&bundle).confidence < 0.5);
+    }
+
+    #[tokio::test]
+    async fn mock_runner_exercises_all_semantic_stages_without_leaking_forward_input() {
+        let task = TaskInput {
+            text: "SECRET_ORIGINAL_TASK_SENTINEL".to_owned(),
+        };
+        let intended = IntendedSpec {
+            objective: "Add safe behavior".to_owned(),
+            requirements: vec!["Validate input".to_owned()],
+            ..IntendedSpec::default()
+        };
+        let bundle: BlindBundle = serde_json::from_value(json!({
+            "patch": {
+                "base_revision": "abc", "files": [{
+                    "path": "src/lib.rs", "status": "modified",
+                    "patch": "@@ -1 +1 @@\n-old\n+new", "insertions": 1,
+                    "deletions": 1, "binary": false
+                }], "renames": 0, "insertions": 1, "deletions": 1,
+                "binary_files": [], "untracked_files": []
+            },
+            "context": [],
+            "manifest": { "context_policy": "patch", "patch_files": ["src/lib.rs"], "context_files": [], "excluded_paths": [], "total_bytes": 20 },
+            "blindness_report": { "isolation": "strict", "entries": [], "limitations": [] }
+        }))
+        .unwrap();
+        let echoed = EchoedSpec {
+            apparent_objective: "Add safe behavior".to_owned(),
+            behavior_after: vec!["Validates input".to_owned()],
+            affected_scope: vec!["src/lib.rs".to_owned()],
+            confidence: 0.9,
+            ..EchoedSpec::default()
+        };
+        let verdict = json!({
+            "alignment": "SAME",
+            "agreements": ["Validate input"],
+            "missing_requirements": [],
+            "unrequested_changes": [],
+            "violated_constraints": [],
+            "potential_side_effects": [],
+            "uncertainties": [],
+            "evidence": [{
+                "file": null, "line_start": null, "line_end": null,
+                "patch_hunk": null, "description": "Patch validates input",
+                "confidence": 0.9
+            }],
+            "confidence": 0.9,
+            "recommended_action": "SHIP"
+        });
+        let runner = MockRunner::new([
+            serde_json::to_value(&intended).unwrap(),
+            serde_json::to_value(&echoed).unwrap(),
+            verdict,
+        ]);
+
+        let (actual_intended, _) = generate_typed::<IntendedSpec>(
+            &runner,
+            RequestPurpose::AnalyzeForwardIntent,
+            serde_json::to_value(&task).unwrap(),
+        )
+        .await
+        .unwrap();
+        let serialized_blind_input = serde_json::to_string(&blind_input(&bundle).unwrap()).unwrap();
+        assert!(!serialized_blind_input.contains("SECRET_ORIGINAL_TASK_SENTINEL"));
+        for forbidden in [
+            "original_task",
+            "intended_spec",
+            "conversation",
+            "commit_message",
+        ] {
+            assert!(!serialized_blind_input.contains(forbidden));
+        }
+        let (actual_echoed, _) = generate_typed::<EchoedSpec>(
+            &runner,
+            RequestPurpose::ReconstructPatchIntent,
+            blind_input(&bundle).unwrap(),
+        )
+        .await
+        .unwrap();
+        let (actual_verdict, _) = generate_typed::<Verdict>(
+            &runner,
+            RequestPurpose::ReconcileIntent,
+            json!({"intended_spec": actual_intended, "echoed_spec": actual_echoed}),
+        )
+        .await
+        .unwrap();
+        assert_eq!(actual_verdict.alignment, Alignment::Same);
+        assert_eq!(actual_verdict.recommended_action, RecommendedAction::Ship);
+    }
+
+    #[test]
+    fn evidence_validation_removes_fabricated_locations() {
+        let bundle: BlindBundle = serde_json::from_value(json!({
+            "patch": {
+                "base_revision": "abc", "files": [{
+                    "path": "src/lib.rs", "status": "modified", "patch": "@@ -1 +1 @@\n-old\n+new",
+                    "insertions": 1, "deletions": 1, "binary": false
+                }], "renames": 0, "insertions": 1, "deletions": 1,
+                "binary_files": [], "untracked_files": []
+            }, "context": [],
+            "manifest": { "context_policy": "patch", "patch_files": ["src/lib.rs"], "context_files": [], "excluded_paths": [], "total_bytes": 20 },
+            "blindness_report": { "isolation": "strict", "entries": [], "limitations": [] }
+        })).unwrap();
+        let mut verdict = Verdict {
+            alignment: Alignment::Partial,
+            agreements: Vec::new(),
+            missing_requirements: vec!["Missing validation".to_owned()],
+            unrequested_changes: Vec::new(),
+            violated_constraints: Vec::new(),
+            potential_side_effects: Vec::new(),
+            uncertainties: Vec::new(),
+            evidence: vec![Evidence {
+                file: Some("invented.rs".to_owned()),
+                line_start: Some(999),
+                line_end: Some(1000),
+                patch_hunk: Some("fabricated".to_owned()),
+                description: "Unrelated claim".to_owned(),
+                confidence: 0.8,
+            }],
+            confidence: 0.8,
+            recommended_action: RecommendedAction::RevisePatch,
+        };
+        validate_evidence(&mut verdict, &bundle);
+        assert!(verdict.evidence[0].file.is_none());
+        assert!(verdict.evidence[0].line_start.is_none());
+        assert!(
+            verdict
+                .evidence
+                .iter()
+                .any(|evidence| evidence.description == "Missing validation")
+        );
     }
 }
