@@ -16,8 +16,8 @@ use thiserror::Error;
 
 use crate::{EvidenceError, validate_verdict_evidence};
 
-const VERIFIER_INSTRUCTIONS: &str = "You are the blind Flect verifier. You have not been given the original task. Do not attempt to discover it. Inspect only the supplied sanitized patch evidence. Determine what behavior this patch appears to add, remove, or change. Return only a valid EchoedSpec matching the supplied schema. Do not perform general style review. Do not invent files, lines, requirements, or motivations. Preserve uncertainty.";
-const JUDGE_INSTRUCTIONS: &str = "You are the Flect reconciliation judge. Compare IntendedSpec with EchoedSpec. Do not review unrelated code quality. Return only a valid Verdict. Use SAME only with no material divergence; PARTIAL for missing requirements, constraints, scope creep, or meaningful unexpected behavior; DIFFERENT for a materially different or contradictory change; UNCERTAIN for insufficient evidence. Never fabricate evidence.";
+const VERIFIER_INSTRUCTIONS: &str = "You are the blind Flect verifier. You have not been given the original task. Do not attempt to discover it. Inspect only the supplied sanitized patch evidence. Determine what behavior this patch appears to add, remove, or change. Return only a valid EchoedSpec matching the supplied schema. Each affected_scope entry is an object: file must exactly equal a path in the supplied manifest; symbol is optional descriptive function, class, or region detail and is not a path. Do not perform general style review. Do not invent files, lines, requirements, or motivations. Preserve uncertainty.";
+const JUDGE_INSTRUCTIONS: &str = "You are the Flect reconciliation judge. Compare IntendedSpec with EchoedSpec. Do not review unrelated code quality. Return only a valid Verdict. Use SAME only with no material divergence; PARTIAL for missing requirements, constraints, scope creep, or meaningful unexpected behavior; DIFFERENT for a materially different or contradictory change; UNCERTAIN for insufficient evidence. Never fabricate evidence. Follow evidence_contract exactly: use only its file and hunk IDs/ranges, and associate each negative finding with its stable finding ID. SAME needs no negative-finding evidence.";
 static JOB_SEQUENCE: AtomicU64 = AtomicU64::new(0);
 
 #[derive(Debug, Error)]
@@ -224,9 +224,9 @@ impl AgentService {
             .echoed_spec
             .affected_scope
             .iter()
-            .find(|scope| !allowed.contains(&scope.as_str()))
+            .find(|scope| !allowed.contains(&scope.file.as_str()))
         {
-            return Err(AgentWorkflowError::UnavailableScope(scope.clone()));
+            return Err(AgentWorkflowError::UnavailableScope(scope.file.clone()));
         }
         state.status = BlindStatus::EchoAccepted;
         state.echoed_spec = Some(submission.echoed_spec.clone());
@@ -268,6 +268,7 @@ impl AgentService {
             intended_spec: run.intended_spec,
             echoed_spec,
             available_evidence: blind.job.bundle.patch.files.clone(),
+            evidence_contract: evidence_contract(&blind.job.bundle),
             verdict_schema: strict_schema::<flect_core::Verdict>()?,
         };
         self.save_reconciliation_state(&ReconciliationState {
@@ -510,6 +511,32 @@ impl AgentService {
     ) -> Result<ReconciliationState, AgentWorkflowError> {
         read_state(&self.reconciliation_state_path(job_id)?, job_id)
     }
+}
+
+fn evidence_contract(bundle: &BlindBundle) -> Value {
+    let files = bundle.patch.files.iter().map(|file| {
+        let hunks = file.patch.split("@@ ").skip(1).filter_map(|part| {
+            let hunk = format!("@@ {part}");
+            let header = hunk.lines().next()?;
+            let plus = header.split_whitespace().find(|part| part.starts_with('+'))?;
+            let (start, count) = plus[1..].split_once(',').unwrap_or((&plus[1..], "1"));
+            let start = start.parse::<u32>().ok()?;
+            let count = count.parse::<u32>().ok()?;
+            Some(serde_json::json!({"hunk": hunk, "line_start": start, "line_end": start.saturating_add(count.saturating_sub(1))}))
+        }).collect::<Vec<_>>();
+        serde_json::json!({"file": file.path, "hunks": hunks})
+    }).collect::<Vec<_>>();
+    serde_json::json!({
+        "version": 1,
+        "finding_id_format": "<category>/<zero-based-index>; categories: missing_requirements, unrequested_changes, violated_constraints, potential_side_effects",
+        "rules": [
+            "Evidence.file must equal a listed file.",
+            "Evidence.patch_hunk, when present, must exactly equal a listed hunk; line_start and line_end must be within that hunk's listed range.",
+            "Each negative finding must be referenced by at least one Evidence.finding_ids entry. SAME requires no negative-finding evidence.",
+            "Evidence.finding_ids must use only finding IDs that exist in the submitted Verdict."
+        ],
+        "files": files
+    })
 }
 
 #[derive(Serialize, Deserialize)]

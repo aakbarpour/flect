@@ -142,7 +142,7 @@ fn exercise_agent_handoff(client: &mut McpClient) -> Value {
                 "apparent_objective": "Change app behavior",
                 "behavior_before": ["The app used old behavior"],
                 "behavior_after": ["The app uses new behavior"],
-                "affected_scope": ["app.txt"],
+                "affected_scope": [{"file": "app.txt", "symbol": null}],
                 "side_effects": [], "assumptions": [], "uncertainties": [], "confidence": 0.9
             },
             "model": "test-verifier", "model_selection": "explicit"

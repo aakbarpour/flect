@@ -2,7 +2,9 @@
 
 use std::collections::BTreeSet;
 
-use crate::domain::{Alignment, EchoedSpec, Evidence, IntendedSpec, RecommendedAction, Verdict};
+use crate::domain::{
+    AffectedScope, Alignment, EchoedSpec, Evidence, IntendedSpec, RecommendedAction, Verdict,
+};
 
 /// Compares intended and reconstructed behavior without invoking another model.
 ///
@@ -42,10 +44,11 @@ pub fn reconcile(intended: &IntendedSpec, echoed: &EchoedSpec) -> Verdict {
             if !intended
                 .expected_scope
                 .iter()
-                .any(|expected| coverage(expected, affected) >= 0.5)
+                .any(|expected| coverage(expected, &affected.file) >= 0.5)
             {
                 unrequested_changes.push(format!(
-                    "Affected scope outside the expected boundary: {affected}"
+                    "Affected scope outside the expected boundary: {}",
+                    affected.file
                 ));
             }
         }
@@ -125,6 +128,7 @@ fn build_evidence(
         line_start: None,
         line_end: None,
         patch_hunk: None,
+        finding_ids: Vec::new(),
         description: format!("No reconstructed behavior matched requirement: {requirement}"),
         confidence: echoed.confidence,
     }));
@@ -133,6 +137,7 @@ fn build_evidence(
         line_start: None,
         line_end: None,
         patch_hunk: None,
+        finding_ids: Vec::new(),
         description: format!("Reconstructed behavior appears to conflict with: {constraint}"),
         confidence: echoed.confidence,
     }));
@@ -141,6 +146,7 @@ fn build_evidence(
         line_start: None,
         line_end: None,
         patch_hunk: None,
+        finding_ids: Vec::new(),
         description: change.clone(),
         confidence: echoed.confidence,
     }));
@@ -150,6 +156,7 @@ fn build_evidence(
             line_start: None,
             line_end: None,
             patch_hunk: None,
+            finding_ids: Vec::new(),
             description: format!(
                 "Requested objective `{}` has little lexical overlap with reconstructed objective `{}`",
                 intended.objective, echoed.apparent_objective
@@ -164,7 +171,12 @@ fn reconstructed_text(echoed: &EchoedSpec) -> String {
     std::iter::once(echoed.apparent_objective.as_str())
         .chain(echoed.behavior_before.iter().map(String::as_str))
         .chain(echoed.behavior_after.iter().map(String::as_str))
-        .chain(echoed.affected_scope.iter().map(String::as_str))
+        .chain(
+            echoed
+                .affected_scope
+                .iter()
+                .map(|scope| scope.file.as_str()),
+        )
         .chain(echoed.side_effects.iter().map(String::as_str))
         .collect::<Vec<_>>()
         .join(" ")
@@ -207,11 +219,11 @@ fn terms(text: &str) -> BTreeSet<String> {
         .collect()
 }
 
-fn scope_file_for(description: &str, scope: &[String]) -> Option<String> {
+fn scope_file_for(description: &str, scope: &[AffectedScope]) -> Option<String> {
     scope
         .iter()
-        .find(|item| item.contains('/') && description.contains(item.as_str()))
-        .cloned()
+        .find(|item| item.file.contains('/') && description.contains(item.file.as_str()))
+        .map(|item| item.file.clone())
 }
 
 #[cfg(test)]
@@ -294,7 +306,16 @@ mod tests {
                 "Expired refresh tokens are rejected".to_owned(),
                 "Tokens rotate after refresh".to_owned(),
             ],
-            affected_scope: vec!["auth".to_owned(), "billing".to_owned()],
+            affected_scope: vec![
+                AffectedScope {
+                    file: "auth".to_owned(),
+                    symbol: None,
+                },
+                AffectedScope {
+                    file: "billing".to_owned(),
+                    symbol: None,
+                },
+            ],
             confidence: 0.9,
             ..EchoedSpec::default()
         };

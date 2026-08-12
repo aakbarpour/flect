@@ -4,9 +4,9 @@ use std::process::Command;
 
 use flect_app::{AgentService, AgentWorkflowError, CleanupOptions};
 use flect_core::{
-    AgentModelSelection, Alignment, BlindAgentSubmission, EchoedSpec, Evidence, GitRepository,
-    IntendedSpec, RecommendedAction, ReconciliationAgentSubmission, RunRecord, RunStore, TaskInput,
-    Verdict,
+    AffectedScope, AgentModelSelection, Alignment, BlindAgentSubmission, EchoedSpec, Evidence,
+    GitRepository, IntendedSpec, RecommendedAction, ReconciliationAgentSubmission, RunRecord,
+    RunStore, TaskInput, Verdict,
 };
 
 const TASK_SENTINEL: &str = "ORIGINAL_TASK_SECRET_7F91";
@@ -49,7 +49,10 @@ fn complete_agent_handoff_is_blind_validated_and_persisted() {
     let echoed = EchoedSpec {
         apparent_objective: "Reject disabled accounts".to_owned(),
         behavior_after: vec!["Disabled accounts are rejected".to_owned()],
-        affected_scope: vec!["app.txt".to_owned()],
+        affected_scope: vec![AffectedScope {
+            file: "app.txt".to_owned(),
+            symbol: None,
+        }],
         confidence: 0.9,
         ..EchoedSpec::default()
     };
@@ -96,6 +99,50 @@ fn complete_agent_handoff_is_blind_validated_and_persisted() {
         record
     );
     assert!(!Path::new(&blind_workspace).exists());
+}
+
+#[test]
+fn accepts_structured_scope_and_exposes_judge_evidence_contract() {
+    let repository = fixture_repository();
+    let workspace = tempfile::tempdir().unwrap();
+    let service = AgentService::with_workspace_root(
+        GitRepository::discover(repository.path()).unwrap(),
+        workspace.path().join("jobs"),
+    )
+    .unwrap();
+    let blind = service.prepare_blind(None, None).unwrap();
+    service
+        .submit_echo(BlindAgentSubmission {
+            job_id: blind.job_id.clone(),
+            echoed_spec: EchoedSpec {
+                affected_scope: vec![AffectedScope {
+                    file: "app.txt".to_owned(),
+                    symbol: Some("normalize_name".to_owned()),
+                }],
+                confidence: 0.9,
+                ..EchoedSpec::default()
+            },
+            model: None,
+            model_selection: AgentModelSelection::Explicit,
+        })
+        .unwrap();
+    let judge = service.prepare_reconciliation(&blind.job_id).unwrap();
+    assert_eq!(judge.evidence_contract["version"], 1);
+    assert!(
+        judge.evidence_contract["rules"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|rule| rule.as_str().unwrap().contains("finding ID"))
+    );
+    assert_eq!(judge.evidence_contract["files"][0]["file"], "app.txt");
+    assert!(
+        judge.evidence_contract["files"][0]["hunks"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|hunk| hunk["hunk"].as_str().unwrap().starts_with("@@ "))
+    );
 }
 
 #[test]
@@ -196,7 +243,10 @@ fn rejects_fabricated_scope_evidence_reuse_and_unsafe_workspace() {
         .submit_echo(BlindAgentSubmission {
             job_id: blind.job_id.clone(),
             echoed_spec: EchoedSpec {
-                affected_scope: vec!["invented.rs".to_owned()],
+                affected_scope: vec![AffectedScope {
+                    file: "invented.rs".to_owned(),
+                    symbol: None,
+                }],
                 ..EchoedSpec::default()
             },
             model: None,
@@ -206,7 +256,10 @@ fn rejects_fabricated_scope_evidence_reuse_and_unsafe_workspace() {
     assert!(matches!(error, AgentWorkflowError::UnavailableScope(_)));
 
     let echoed = EchoedSpec {
-        affected_scope: vec!["app.txt".to_owned()],
+        affected_scope: vec![AffectedScope {
+            file: "app.txt".to_owned(),
+            symbol: None,
+        }],
         confidence: 0.8,
         ..EchoedSpec::default()
     };
@@ -260,7 +313,10 @@ fn rejects_fabricated_verdict_evidence() {
         .submit_echo(BlindAgentSubmission {
             job_id: blind.job_id.clone(),
             echoed_spec: EchoedSpec {
-                affected_scope: vec!["app.txt".to_owned()],
+                affected_scope: vec![AffectedScope {
+                    file: "app.txt".to_owned(),
+                    symbol: None,
+                }],
                 confidence: 0.8,
                 ..EchoedSpec::default()
             },
@@ -285,6 +341,7 @@ fn rejects_fabricated_verdict_evidence() {
                 line_start: None,
                 line_end: None,
                 patch_hunk: None,
+                finding_ids: Vec::new(),
                 description: finding,
                 confidence: 0.8,
             }],

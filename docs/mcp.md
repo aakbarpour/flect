@@ -12,6 +12,8 @@ codex mcp add flect -- C:\path\to\flect\target\release\flect.exe mcp
 codex mcp list
 ```
 
+Restart or reconnect the Codex task after registration, then use the MCP tool picker (or `/mcp`) to confirm that `flect_start`, `flect_prepare_blind`, `flect_submit_echo`, `flect_prepare_reconciliation`, and `flect_submit_verdict` are callable. `flect mcp` being available in `flect doctor` only confirms the server binary; it does not register the server with the running Codex task.
+
 On macOS or Linux, use the corresponding `target/release/flect` path. Codex stores MCP configuration in `~/.codex/config.toml`. A trusted repository may instead carry project-scoped configuration in `.codex/config.toml`:
 
 ```toml

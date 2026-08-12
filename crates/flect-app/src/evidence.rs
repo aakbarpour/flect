@@ -9,8 +9,10 @@ pub enum EvidenceError {
     UnknownHunk(String),
     #[error("evidence line range is invalid for the supplied patch hunk in `{0}`")]
     InvalidLineRange(String),
-    #[error("negative finding `{0}` has no corresponding evidence description")]
+    #[error("negative finding `{0}` has no corresponding evidence association")]
     MissingFindingEvidence(String),
+    #[error("evidence references unavailable finding ID `{0}`")]
+    UnknownFinding(String),
     #[error("verdict alignment {alignment} is inconsistent with recommended action {action}")]
     InconsistentAction {
         alignment: Alignment,
@@ -61,19 +63,23 @@ pub fn validate_verdict_evidence(
             return Err(EvidenceError::InvalidLineRange(file.to_owned()));
         }
     }
-    for finding in verdict
-        .missing_requirements
-        .iter()
-        .chain(&verdict.unrequested_changes)
-        .chain(&verdict.violated_constraints)
-        .chain(&verdict.potential_side_effects)
-    {
+    let expected_findings = finding_ids(verdict);
+    for evidence in &verdict.evidence {
+        if let Some(unknown) = evidence
+            .finding_ids
+            .iter()
+            .find(|finding| !expected_findings.contains(finding))
+        {
+            return Err(EvidenceError::UnknownFinding(unknown.clone()));
+        }
+    }
+    for finding in expected_findings {
         if !verdict
             .evidence
             .iter()
-            .any(|evidence| evidence.description.contains(finding))
+            .any(|evidence| evidence.finding_ids.contains(&finding))
         {
-            return Err(EvidenceError::MissingFindingEvidence(finding.clone()));
+            return Err(EvidenceError::MissingFindingEvidence(finding));
         }
     }
     Ok(())
@@ -84,17 +90,11 @@ pub fn sanitize_verdict_evidence(verdict: &mut Verdict, bundle: &BlindBundle) {
     for evidence in &mut verdict.evidence {
         sanitize_location(evidence, bundle);
     }
-    let findings = verdict
-        .missing_requirements
-        .iter()
-        .chain(&verdict.unrequested_changes)
-        .chain(&verdict.violated_constraints)
-        .chain(&verdict.potential_side_effects);
-    for finding in findings {
+    for finding in finding_ids(verdict) {
         if !verdict
             .evidence
             .iter()
-            .any(|evidence| evidence.description.contains(finding))
+            .any(|evidence| evidence.finding_ids.contains(&finding))
         {
             verdict.evidence.push(Evidence {
                 file: None,
@@ -102,10 +102,29 @@ pub fn sanitize_verdict_evidence(verdict: &mut Verdict, bundle: &BlindBundle) {
                 line_end: None,
                 patch_hunk: None,
                 description: finding.clone(),
+                finding_ids: vec![finding],
                 confidence: verdict.confidence,
             });
         }
     }
+}
+
+/// Stable IDs exposed in the judge contract for every negative finding.
+pub fn finding_ids(verdict: &Verdict) -> Vec<String> {
+    [
+        ("missing_requirements", &verdict.missing_requirements),
+        ("unrequested_changes", &verdict.unrequested_changes),
+        ("violated_constraints", &verdict.violated_constraints),
+        ("potential_side_effects", &verdict.potential_side_effects),
+    ]
+    .into_iter()
+    .flat_map(|(kind, findings)| {
+        findings
+            .iter()
+            .enumerate()
+            .map(move |(index, _)| format!("{kind}/{index}"))
+    })
+    .collect()
 }
 
 fn sanitize_location(evidence: &mut Evidence, bundle: &BlindBundle) {

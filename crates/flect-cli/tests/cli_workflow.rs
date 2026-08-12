@@ -46,7 +46,7 @@ fn offline_workflow_persists_a_blind_verdict() {
             "apparent_objective": "Add new behavior",
             "behavior_before": ["Old behavior was present"],
             "behavior_after": ["New behavior is present"],
-            "affected_scope": ["app.txt"],
+            "affected_scope": [{"file": "app.txt", "symbol": null}],
             "side_effects": [],
             "assumptions": [],
             "uncertainties": [],
