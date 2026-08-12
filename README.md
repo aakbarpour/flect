@@ -8,7 +8,7 @@ It gives an independent verifier the patch without the original task, reconstruc
 
 Tests ask whether the code works. Flect asks whether you built the right thing.
 
-> **Project status:** Milestones 0 and 1 are implemented. The CLI, Git capture, privacy boundary, structured domain, offline fixtures, and deterministic reconciliation are usable. A real model-backed verifier is deliberately deferred to Milestone 2. Without an explicit offline `EchoedSpec`, Flect returns an uncertain file-level reconstruction and never claims verification.
+> **Project status:** Milestones 0 and 1 are implemented. The CLI, Git capture, privacy boundary, structured domain, offline fixtures, and deterministic reconciliation are usable. Milestone 2 has a tested Responses API transport, while semantic pipeline orchestration is still in progress. Until that orchestration lands, verification remains mock-only and never silently invokes an API.
 
 ## How it works
 
@@ -88,6 +88,24 @@ Recommended action
 ```
 
 `--echoed-spec` is an offline Milestone 1 seam, primarily for deterministic tests and evaluation fixtures. Omitting it uses the bundled mock runner and produces `UNCERTAIN`. Real provider configuration is not silently simulated.
+
+## Responses API transport
+
+Flect includes a reusable OpenAI-compatible Responses API runner with strict JSON Schema output, credential redaction, timeouts, and typed provider errors. Configure it in `flect.toml`:
+
+```toml
+[runner]
+kind = "api"
+protocol = "responses"
+base_url = "https://api.openai.com/v1"
+api_key_env = "OPENAI_API_KEY"
+model = "gpt-5.6-luna"
+fallback_model = "gpt-5.6-terra"
+reasoning_effort = "medium"
+timeout_seconds = 120
+```
+
+Set the named environment variable outside the configuration file. `flect doctor` reports whether it is present without printing its value. The `verify` and `echo` commands will begin using this transport when the semantic orchestration work lands; today they fail clearly when `kind = "api"` instead of falling back to mock output.
 
 ## Commands
 

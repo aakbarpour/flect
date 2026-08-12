@@ -80,10 +80,11 @@ enum Command {
     Doctor,
 }
 
-fn main() -> Result<()> {
+#[tokio::main]
+async fn main() -> Result<()> {
     let cli = Cli::parse();
     init_tracing(cli.verbose);
-    app::run(cli.command, cli.json)
+    app::run(cli.command, cli.json).await
 }
 
 fn init_tracing(verbosity: u8) {

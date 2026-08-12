@@ -59,6 +59,40 @@ fn offline_workflow_persists_a_blind_verdict() {
     assert!(!bundle.contains("Add new behavior"));
 }
 
+#[test]
+fn doctor_reports_api_credential_readiness_without_exposing_values() {
+    let repository = tempfile::tempdir().unwrap();
+    git(repository.path(), ["init", "-b", "main"]);
+    assert_success(flect(repository.path(), ["init"]));
+
+    let config_path = repository.path().join("flect.toml");
+    let config = fs::read_to_string(&config_path)
+        .unwrap()
+        .replace(
+            "kind = \"mock\"",
+            "kind = \"api\"\nmodel = \"custom-model\"",
+        )
+        .replace("OPENAI_API_KEY", "FLECT_DOCTOR_TEST_KEY");
+    fs::write(config_path, config).unwrap();
+
+    let output = Command::new(env!("CARGO_BIN_EXE_flect"))
+        .current_dir(repository.path())
+        .env_remove("FLECT_DOCTOR_TEST_KEY")
+        .args(["--json", "doctor"])
+        .output()
+        .unwrap();
+    assert_success(&output);
+    let report: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(report["runner"]["kind"], "api");
+    assert_eq!(report["runner"]["model"], "custom-model");
+    assert_eq!(
+        report["runner"]["credential"]["environment"],
+        "FLECT_DOCTOR_TEST_KEY"
+    );
+    assert_eq!(report["runner"]["credential"]["available"], false);
+    assert_eq!(report["ready"], false);
+}
+
 fn flect<const N: usize>(directory: &Path, arguments: [&str; N]) -> Output {
     Command::new(env!("CARGO_BIN_EXE_flect"))
         .current_dir(directory)
