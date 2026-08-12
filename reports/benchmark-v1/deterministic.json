@@ -1,9 +1,9 @@
 {
   "version": 1,
   "suite": "fixtures/evaluation/cases.json",
-  "suite_hash": "ed383f01249fe19e1c05774262e159b75ebedaff",
-  "git_revision": "ef2ca6d68d49d429976292a22c41f84ac6b14cb7",
-  "generated_unix_ms": 1786543999065,
+  "suite_hash": "c9d068fee92b901c04a66d3366f5937c02538cec",
+  "git_revision": "83d9085b615686e1d6ffd28c4c5ccbb955de9cf4",
+  "generated_unix_ms": 1786546761363,
   "mode": "offline",
   "profiles": [
     {
@@ -165,6 +165,7 @@
           "denominator": 6,
           "fraction": 1.0
         },
+        "good_patch_abstentions": 0,
         "bad_patch_detection": {
           "numerator": 31,
           "denominator": 34,
@@ -182,7 +183,12 @@
           "denominator": 31,
           "fraction": 1.0
         },
-        "finding_category_accuracy": {
+        "finding_category_exact_match": {
+          "numerator": 32,
+          "denominator": 31,
+          "fraction": 1.032258064516129
+        },
+        "finding_category_recall": {
           "numerator": 31,
           "denominator": 31,
           "fraction": 1.0
@@ -205,15 +211,26 @@
           "expected": "SAME",
           "actual": "SAME",
           "verdict_match": true,
-          "verifier_schema_status": "succeeded",
-          "judge_schema_status": "succeeded",
+          "verifier_stage": {
+            "attempts": [
+              "succeeded"
+            ],
+            "final_status": "succeeded"
+          },
+          "judge_stage": {
+            "attempts": [
+              "succeeded"
+            ],
+            "final_status": "succeeded"
+          },
           "evidence_validation_status": "succeeded",
           "failure_category": null,
           "execution_mode": "deterministic_fixture",
           "expected_findings": 0,
           "matched_findings": 0,
-          "expected_finding_category": null,
-          "finding_category_match": null,
+          "expected_finding_categories": [],
+          "actual_finding_categories": [],
+          "finding_category_match": true,
           "evidence_ref_validation_failures": 0,
           "models": [
             "fixture-mock",
@@ -234,14 +251,29 @@
           "expected": "PARTIAL",
           "actual": "PARTIAL",
           "verdict_match": true,
-          "verifier_schema_status": "succeeded",
-          "judge_schema_status": "succeeded",
+          "verifier_stage": {
+            "attempts": [
+              "succeeded"
+            ],
+            "final_status": "succeeded"
+          },
+          "judge_stage": {
+            "attempts": [
+              "succeeded"
+            ],
+            "final_status": "succeeded"
+          },
           "evidence_validation_status": "succeeded",
           "failure_category": null,
           "execution_mode": "deterministic_fixture",
           "expected_findings": 1,
           "matched_findings": 1,
-          "expected_finding_category": "missing_requirement",
+          "expected_finding_categories": [
+            "missing_requirement"
+          ],
+          "actual_finding_categories": [
+            "missing_requirement"
+          ],
           "finding_category_match": true,
           "evidence_ref_validation_failures": 0,
           "models": [
@@ -263,15 +295,31 @@
           "expected": "PARTIAL",
           "actual": "PARTIAL",
           "verdict_match": true,
-          "verifier_schema_status": "succeeded",
-          "judge_schema_status": "succeeded",
+          "verifier_stage": {
+            "attempts": [
+              "succeeded"
+            ],
+            "final_status": "succeeded"
+          },
+          "judge_stage": {
+            "attempts": [
+              "succeeded"
+            ],
+            "final_status": "succeeded"
+          },
           "evidence_validation_status": "succeeded",
           "failure_category": null,
           "execution_mode": "deterministic_fixture",
           "expected_findings": 1,
           "matched_findings": 1,
-          "expected_finding_category": "unrequested_change",
-          "finding_category_match": true,
+          "expected_finding_categories": [
+            "unrequested_change"
+          ],
+          "actual_finding_categories": [
+            "potential_side_effect",
+            "unrequested_change"
+          ],
+          "finding_category_match": false,
           "evidence_ref_validation_failures": 0,
           "models": [
             "fixture-mock",
@@ -292,15 +340,31 @@
           "expected": "PARTIAL",
           "actual": "PARTIAL",
           "verdict_match": true,
-          "verifier_schema_status": "succeeded",
-          "judge_schema_status": "succeeded",
+          "verifier_stage": {
+            "attempts": [
+              "succeeded"
+            ],
+            "final_status": "succeeded"
+          },
+          "judge_stage": {
+            "attempts": [
+              "succeeded"
+            ],
+            "final_status": "succeeded"
+          },
           "evidence_validation_status": "succeeded",
           "failure_category": null,
           "execution_mode": "deterministic_fixture",
           "expected_findings": 1,
           "matched_findings": 1,
-          "expected_finding_category": "violated_constraint",
-          "finding_category_match": true,
+          "expected_finding_categories": [
+            "violated_constraint"
+          ],
+          "actual_finding_categories": [
+            "potential_side_effect",
+            "violated_constraint"
+          ],
+          "finding_category_match": false,
           "evidence_ref_validation_failures": 0,
           "models": [
             "fixture-mock",
@@ -321,15 +385,31 @@
           "expected": "PARTIAL",
           "actual": "PARTIAL",
           "verdict_match": true,
-          "verifier_schema_status": "succeeded",
-          "judge_schema_status": "succeeded",
+          "verifier_stage": {
+            "attempts": [
+              "succeeded"
+            ],
+            "final_status": "succeeded"
+          },
+          "judge_stage": {
+            "attempts": [
+              "succeeded"
+            ],
+            "final_status": "succeeded"
+          },
           "evidence_validation_status": "succeeded",
           "failure_category": null,
           "execution_mode": "deterministic_fixture",
           "expected_findings": 1,
           "matched_findings": 1,
-          "expected_finding_category": "violated_constraint",
-          "finding_category_match": true,
+          "expected_finding_categories": [
+            "violated_constraint"
+          ],
+          "actual_finding_categories": [
+            "potential_side_effect",
+            "violated_constraint"
+          ],
+          "finding_category_match": false,
           "evidence_ref_validation_failures": 0,
           "models": [
             "fixture-mock",
@@ -350,15 +430,32 @@
           "expected": "PARTIAL",
           "actual": "PARTIAL",
           "verdict_match": true,
-          "verifier_schema_status": "succeeded",
-          "judge_schema_status": "succeeded",
+          "verifier_stage": {
+            "attempts": [
+              "succeeded"
+            ],
+            "final_status": "succeeded"
+          },
+          "judge_stage": {
+            "attempts": [
+              "succeeded"
+            ],
+            "final_status": "succeeded"
+          },
           "evidence_validation_status": "succeeded",
           "failure_category": null,
           "execution_mode": "deterministic_fixture",
           "expected_findings": 1,
           "matched_findings": 1,
-          "expected_finding_category": "unrequested_change",
-          "finding_category_match": true,
+          "expected_finding_categories": [
+            "unrequested_change"
+          ],
+          "actual_finding_categories": [
+            "potential_side_effect",
+            "unrequested_change",
+            "violated_constraint"
+          ],
+          "finding_category_match": false,
           "evidence_ref_validation_failures": 0,
           "models": [
             "fixture-mock",
@@ -379,15 +476,32 @@
           "expected": "DIFFERENT",
           "actual": "DIFFERENT",
           "verdict_match": true,
-          "verifier_schema_status": "succeeded",
-          "judge_schema_status": "succeeded",
+          "verifier_stage": {
+            "attempts": [
+              "succeeded"
+            ],
+            "final_status": "succeeded"
+          },
+          "judge_stage": {
+            "attempts": [
+              "succeeded"
+            ],
+            "final_status": "succeeded"
+          },
           "evidence_validation_status": "succeeded",
           "failure_category": null,
           "execution_mode": "deterministic_fixture",
           "expected_findings": 1,
           "matched_findings": 1,
-          "expected_finding_category": "unrequested_change",
-          "finding_category_match": true,
+          "expected_finding_categories": [
+            "unrequested_change"
+          ],
+          "actual_finding_categories": [
+            "potential_side_effect",
+            "unrequested_change",
+            "violated_constraint"
+          ],
+          "finding_category_match": false,
           "evidence_ref_validation_failures": 0,
           "models": [
             "fixture-mock",
@@ -408,15 +522,31 @@
           "expected": "PARTIAL",
           "actual": "PARTIAL",
           "verdict_match": true,
-          "verifier_schema_status": "succeeded",
-          "judge_schema_status": "succeeded",
+          "verifier_stage": {
+            "attempts": [
+              "succeeded"
+            ],
+            "final_status": "succeeded"
+          },
+          "judge_stage": {
+            "attempts": [
+              "succeeded"
+            ],
+            "final_status": "succeeded"
+          },
           "evidence_validation_status": "succeeded",
           "failure_category": null,
           "execution_mode": "deterministic_fixture",
           "expected_findings": 1,
           "matched_findings": 1,
-          "expected_finding_category": "missing_requirement",
-          "finding_category_match": true,
+          "expected_finding_categories": [
+            "missing_requirement"
+          ],
+          "actual_finding_categories": [
+            "missing_requirement",
+            "potential_side_effect"
+          ],
+          "finding_category_match": false,
           "evidence_ref_validation_failures": 0,
           "models": [
             "fixture-mock",
@@ -437,15 +567,31 @@
           "expected": "PARTIAL",
           "actual": "PARTIAL",
           "verdict_match": true,
-          "verifier_schema_status": "succeeded",
-          "judge_schema_status": "succeeded",
+          "verifier_stage": {
+            "attempts": [
+              "succeeded"
+            ],
+            "final_status": "succeeded"
+          },
+          "judge_stage": {
+            "attempts": [
+              "succeeded"
+            ],
+            "final_status": "succeeded"
+          },
           "evidence_validation_status": "succeeded",
           "failure_category": null,
           "execution_mode": "deterministic_fixture",
           "expected_findings": 1,
           "matched_findings": 1,
-          "expected_finding_category": "unrequested_change",
-          "finding_category_match": true,
+          "expected_finding_categories": [
+            "unrequested_change"
+          ],
+          "actual_finding_categories": [
+            "potential_side_effect",
+            "unrequested_change"
+          ],
+          "finding_category_match": false,
           "evidence_ref_validation_failures": 0,
           "models": [
             "fixture-mock",
@@ -466,15 +612,31 @@
           "expected": "DIFFERENT",
           "actual": "DIFFERENT",
           "verdict_match": true,
-          "verifier_schema_status": "succeeded",
-          "judge_schema_status": "succeeded",
+          "verifier_stage": {
+            "attempts": [
+              "succeeded"
+            ],
+            "final_status": "succeeded"
+          },
+          "judge_stage": {
+            "attempts": [
+              "succeeded"
+            ],
+            "final_status": "succeeded"
+          },
           "evidence_validation_status": "succeeded",
           "failure_category": null,
           "execution_mode": "deterministic_fixture",
           "expected_findings": 1,
           "matched_findings": 1,
-          "expected_finding_category": "missing_requirement",
-          "finding_category_match": true,
+          "expected_finding_categories": [
+            "missing_requirement"
+          ],
+          "actual_finding_categories": [
+            "missing_requirement",
+            "unrequested_change"
+          ],
+          "finding_category_match": false,
           "evidence_ref_validation_failures": 0,
           "models": [
             "fixture-mock",
@@ -495,15 +657,26 @@
           "expected": "SAME",
           "actual": "SAME",
           "verdict_match": true,
-          "verifier_schema_status": "succeeded",
-          "judge_schema_status": "succeeded",
+          "verifier_stage": {
+            "attempts": [
+              "succeeded"
+            ],
+            "final_status": "succeeded"
+          },
+          "judge_stage": {
+            "attempts": [
+              "succeeded"
+            ],
+            "final_status": "succeeded"
+          },
           "evidence_validation_status": "succeeded",
           "failure_category": null,
           "execution_mode": "deterministic_fixture",
           "expected_findings": 0,
           "matched_findings": 0,
-          "expected_finding_category": null,
-          "finding_category_match": null,
+          "expected_finding_categories": [],
+          "actual_finding_categories": [],
+          "finding_category_match": true,
           "evidence_ref_validation_failures": 0,
           "models": [
             "fixture-mock",
@@ -524,15 +697,26 @@
           "expected": "SAME",
           "actual": "SAME",
           "verdict_match": true,
-          "verifier_schema_status": "succeeded",
-          "judge_schema_status": "succeeded",
+          "verifier_stage": {
+            "attempts": [
+              "succeeded"
+            ],
+            "final_status": "succeeded"
+          },
+          "judge_stage": {
+            "attempts": [
+              "succeeded"
+            ],
+            "final_status": "succeeded"
+          },
           "evidence_validation_status": "succeeded",
           "failure_category": null,
           "execution_mode": "deterministic_fixture",
           "expected_findings": 0,
           "matched_findings": 0,
-          "expected_finding_category": null,
-          "finding_category_match": null,
+          "expected_finding_categories": [],
+          "actual_finding_categories": [],
+          "finding_category_match": true,
           "evidence_ref_validation_failures": 0,
           "models": [
             "fixture-mock",
@@ -553,15 +737,26 @@
           "expected": "SAME",
           "actual": "SAME",
           "verdict_match": true,
-          "verifier_schema_status": "succeeded",
-          "judge_schema_status": "succeeded",
+          "verifier_stage": {
+            "attempts": [
+              "succeeded"
+            ],
+            "final_status": "succeeded"
+          },
+          "judge_stage": {
+            "attempts": [
+              "succeeded"
+            ],
+            "final_status": "succeeded"
+          },
           "evidence_validation_status": "succeeded",
           "failure_category": null,
           "execution_mode": "deterministic_fixture",
           "expected_findings": 0,
           "matched_findings": 0,
-          "expected_finding_category": null,
-          "finding_category_match": null,
+          "expected_finding_categories": [],
+          "actual_finding_categories": [],
+          "finding_category_match": true,
           "evidence_ref_validation_failures": 0,
           "models": [
             "fixture-mock",
@@ -582,14 +777,29 @@
           "expected": "PARTIAL",
           "actual": "PARTIAL",
           "verdict_match": true,
-          "verifier_schema_status": "succeeded",
-          "judge_schema_status": "succeeded",
+          "verifier_stage": {
+            "attempts": [
+              "succeeded"
+            ],
+            "final_status": "succeeded"
+          },
+          "judge_stage": {
+            "attempts": [
+              "succeeded"
+            ],
+            "final_status": "succeeded"
+          },
           "evidence_validation_status": "succeeded",
           "failure_category": null,
           "execution_mode": "deterministic_fixture",
           "expected_findings": 1,
           "matched_findings": 1,
-          "expected_finding_category": "missing_requirement",
+          "expected_finding_categories": [
+            "missing_requirement"
+          ],
+          "actual_finding_categories": [
+            "missing_requirement"
+          ],
           "finding_category_match": true,
           "evidence_ref_validation_failures": 0,
           "models": [
@@ -611,14 +821,29 @@
           "expected": "PARTIAL",
           "actual": "PARTIAL",
           "verdict_match": true,
-          "verifier_schema_status": "succeeded",
-          "judge_schema_status": "succeeded",
+          "verifier_stage": {
+            "attempts": [
+              "succeeded"
+            ],
+            "final_status": "succeeded"
+          },
+          "judge_stage": {
+            "attempts": [
+              "succeeded"
+            ],
+            "final_status": "succeeded"
+          },
           "evidence_validation_status": "succeeded",
           "failure_category": null,
           "execution_mode": "deterministic_fixture",
           "expected_findings": 1,
           "matched_findings": 1,
-          "expected_finding_category": "missing_requirement",
+          "expected_finding_categories": [
+            "missing_requirement"
+          ],
+          "actual_finding_categories": [
+            "missing_requirement"
+          ],
           "finding_category_match": true,
           "evidence_ref_validation_failures": 0,
           "models": [
@@ -640,14 +865,29 @@
           "expected": "PARTIAL",
           "actual": "PARTIAL",
           "verdict_match": true,
-          "verifier_schema_status": "succeeded",
-          "judge_schema_status": "succeeded",
+          "verifier_stage": {
+            "attempts": [
+              "succeeded"
+            ],
+            "final_status": "succeeded"
+          },
+          "judge_stage": {
+            "attempts": [
+              "succeeded"
+            ],
+            "final_status": "succeeded"
+          },
           "evidence_validation_status": "succeeded",
           "failure_category": null,
           "execution_mode": "deterministic_fixture",
           "expected_findings": 1,
           "matched_findings": 1,
-          "expected_finding_category": "missing_requirement",
+          "expected_finding_categories": [
+            "missing_requirement"
+          ],
+          "actual_finding_categories": [
+            "missing_requirement"
+          ],
           "finding_category_match": true,
           "evidence_ref_validation_failures": 0,
           "models": [
@@ -669,14 +909,29 @@
           "expected": "PARTIAL",
           "actual": "PARTIAL",
           "verdict_match": true,
-          "verifier_schema_status": "succeeded",
-          "judge_schema_status": "succeeded",
+          "verifier_stage": {
+            "attempts": [
+              "succeeded"
+            ],
+            "final_status": "succeeded"
+          },
+          "judge_stage": {
+            "attempts": [
+              "succeeded"
+            ],
+            "final_status": "succeeded"
+          },
           "evidence_validation_status": "succeeded",
           "failure_category": null,
           "execution_mode": "deterministic_fixture",
           "expected_findings": 1,
           "matched_findings": 1,
-          "expected_finding_category": "violated_constraint",
+          "expected_finding_categories": [
+            "violated_constraint"
+          ],
+          "actual_finding_categories": [
+            "violated_constraint"
+          ],
           "finding_category_match": true,
           "evidence_ref_validation_failures": 0,
           "models": [
@@ -698,14 +953,29 @@
           "expected": "PARTIAL",
           "actual": "PARTIAL",
           "verdict_match": true,
-          "verifier_schema_status": "succeeded",
-          "judge_schema_status": "succeeded",
+          "verifier_stage": {
+            "attempts": [
+              "succeeded"
+            ],
+            "final_status": "succeeded"
+          },
+          "judge_stage": {
+            "attempts": [
+              "succeeded"
+            ],
+            "final_status": "succeeded"
+          },
           "evidence_validation_status": "succeeded",
           "failure_category": null,
           "execution_mode": "deterministic_fixture",
           "expected_findings": 1,
           "matched_findings": 1,
-          "expected_finding_category": "violated_constraint",
+          "expected_finding_categories": [
+            "violated_constraint"
+          ],
+          "actual_finding_categories": [
+            "violated_constraint"
+          ],
           "finding_category_match": true,
           "evidence_ref_validation_failures": 0,
           "models": [
@@ -727,14 +997,29 @@
           "expected": "PARTIAL",
           "actual": "PARTIAL",
           "verdict_match": true,
-          "verifier_schema_status": "succeeded",
-          "judge_schema_status": "succeeded",
+          "verifier_stage": {
+            "attempts": [
+              "succeeded"
+            ],
+            "final_status": "succeeded"
+          },
+          "judge_stage": {
+            "attempts": [
+              "succeeded"
+            ],
+            "final_status": "succeeded"
+          },
           "evidence_validation_status": "succeeded",
           "failure_category": null,
           "execution_mode": "deterministic_fixture",
           "expected_findings": 1,
           "matched_findings": 1,
-          "expected_finding_category": "unrequested_change",
+          "expected_finding_categories": [
+            "unrequested_change"
+          ],
+          "actual_finding_categories": [
+            "unrequested_change"
+          ],
           "finding_category_match": true,
           "evidence_ref_validation_failures": 0,
           "models": [
@@ -756,14 +1041,29 @@
           "expected": "PARTIAL",
           "actual": "PARTIAL",
           "verdict_match": true,
-          "verifier_schema_status": "succeeded",
-          "judge_schema_status": "succeeded",
+          "verifier_stage": {
+            "attempts": [
+              "succeeded"
+            ],
+            "final_status": "succeeded"
+          },
+          "judge_stage": {
+            "attempts": [
+              "succeeded"
+            ],
+            "final_status": "succeeded"
+          },
           "evidence_validation_status": "succeeded",
           "failure_category": null,
           "execution_mode": "deterministic_fixture",
           "expected_findings": 1,
           "matched_findings": 1,
-          "expected_finding_category": "unrequested_change",
+          "expected_finding_categories": [
+            "unrequested_change"
+          ],
+          "actual_finding_categories": [
+            "unrequested_change"
+          ],
           "finding_category_match": true,
           "evidence_ref_validation_failures": 0,
           "models": [
@@ -785,14 +1085,29 @@
           "expected": "PARTIAL",
           "actual": "PARTIAL",
           "verdict_match": true,
-          "verifier_schema_status": "succeeded",
-          "judge_schema_status": "succeeded",
+          "verifier_stage": {
+            "attempts": [
+              "succeeded"
+            ],
+            "final_status": "succeeded"
+          },
+          "judge_stage": {
+            "attempts": [
+              "succeeded"
+            ],
+            "final_status": "succeeded"
+          },
           "evidence_validation_status": "succeeded",
           "failure_category": null,
           "execution_mode": "deterministic_fixture",
           "expected_findings": 1,
           "matched_findings": 1,
-          "expected_finding_category": "unrequested_change",
+          "expected_finding_categories": [
+            "unrequested_change"
+          ],
+          "actual_finding_categories": [
+            "unrequested_change"
+          ],
           "finding_category_match": true,
           "evidence_ref_validation_failures": 0,
           "models": [
@@ -814,14 +1129,29 @@
           "expected": "PARTIAL",
           "actual": "PARTIAL",
           "verdict_match": true,
-          "verifier_schema_status": "succeeded",
-          "judge_schema_status": "succeeded",
+          "verifier_stage": {
+            "attempts": [
+              "succeeded"
+            ],
+            "final_status": "succeeded"
+          },
+          "judge_stage": {
+            "attempts": [
+              "succeeded"
+            ],
+            "final_status": "succeeded"
+          },
           "evidence_validation_status": "succeeded",
           "failure_category": null,
           "execution_mode": "deterministic_fixture",
           "expected_findings": 1,
           "matched_findings": 1,
-          "expected_finding_category": "unrequested_change",
+          "expected_finding_categories": [
+            "unrequested_change"
+          ],
+          "actual_finding_categories": [
+            "unrequested_change"
+          ],
           "finding_category_match": true,
           "evidence_ref_validation_failures": 0,
           "models": [
@@ -843,14 +1173,29 @@
           "expected": "DIFFERENT",
           "actual": "DIFFERENT",
           "verdict_match": true,
-          "verifier_schema_status": "succeeded",
-          "judge_schema_status": "succeeded",
+          "verifier_stage": {
+            "attempts": [
+              "succeeded"
+            ],
+            "final_status": "succeeded"
+          },
+          "judge_stage": {
+            "attempts": [
+              "succeeded"
+            ],
+            "final_status": "succeeded"
+          },
           "evidence_validation_status": "succeeded",
           "failure_category": null,
           "execution_mode": "deterministic_fixture",
           "expected_findings": 1,
           "matched_findings": 1,
-          "expected_finding_category": "violated_constraint",
+          "expected_finding_categories": [
+            "violated_constraint"
+          ],
+          "actual_finding_categories": [
+            "violated_constraint"
+          ],
           "finding_category_match": true,
           "evidence_ref_validation_failures": 0,
           "models": [
@@ -872,14 +1217,29 @@
           "expected": "PARTIAL",
           "actual": "PARTIAL",
           "verdict_match": true,
-          "verifier_schema_status": "succeeded",
-          "judge_schema_status": "succeeded",
+          "verifier_stage": {
+            "attempts": [
+              "succeeded"
+            ],
+            "final_status": "succeeded"
+          },
+          "judge_stage": {
+            "attempts": [
+              "succeeded"
+            ],
+            "final_status": "succeeded"
+          },
           "evidence_validation_status": "succeeded",
           "failure_category": null,
           "execution_mode": "deterministic_fixture",
           "expected_findings": 1,
           "matched_findings": 1,
-          "expected_finding_category": "violated_constraint",
+          "expected_finding_categories": [
+            "violated_constraint"
+          ],
+          "actual_finding_categories": [
+            "violated_constraint"
+          ],
           "finding_category_match": true,
           "evidence_ref_validation_failures": 0,
           "models": [
@@ -901,14 +1261,29 @@
           "expected": "DIFFERENT",
           "actual": "DIFFERENT",
           "verdict_match": true,
-          "verifier_schema_status": "succeeded",
-          "judge_schema_status": "succeeded",
+          "verifier_stage": {
+            "attempts": [
+              "succeeded"
+            ],
+            "final_status": "succeeded"
+          },
+          "judge_stage": {
+            "attempts": [
+              "succeeded"
+            ],
+            "final_status": "succeeded"
+          },
           "evidence_validation_status": "succeeded",
           "failure_category": null,
           "execution_mode": "deterministic_fixture",
           "expected_findings": 1,
           "matched_findings": 1,
-          "expected_finding_category": "potential_side_effect",
+          "expected_finding_categories": [
+            "potential_side_effect"
+          ],
+          "actual_finding_categories": [
+            "potential_side_effect"
+          ],
           "finding_category_match": true,
           "evidence_ref_validation_failures": 0,
           "models": [
@@ -930,14 +1305,29 @@
           "expected": "DIFFERENT",
           "actual": "DIFFERENT",
           "verdict_match": true,
-          "verifier_schema_status": "succeeded",
-          "judge_schema_status": "succeeded",
+          "verifier_stage": {
+            "attempts": [
+              "succeeded"
+            ],
+            "final_status": "succeeded"
+          },
+          "judge_stage": {
+            "attempts": [
+              "succeeded"
+            ],
+            "final_status": "succeeded"
+          },
           "evidence_validation_status": "succeeded",
           "failure_category": null,
           "execution_mode": "deterministic_fixture",
           "expected_findings": 1,
           "matched_findings": 1,
-          "expected_finding_category": "potential_side_effect",
+          "expected_finding_categories": [
+            "potential_side_effect"
+          ],
+          "actual_finding_categories": [
+            "potential_side_effect"
+          ],
           "finding_category_match": true,
           "evidence_ref_validation_failures": 0,
           "models": [
@@ -959,14 +1349,29 @@
           "expected": "DIFFERENT",
           "actual": "DIFFERENT",
           "verdict_match": true,
-          "verifier_schema_status": "succeeded",
-          "judge_schema_status": "succeeded",
+          "verifier_stage": {
+            "attempts": [
+              "succeeded"
+            ],
+            "final_status": "succeeded"
+          },
+          "judge_stage": {
+            "attempts": [
+              "succeeded"
+            ],
+            "final_status": "succeeded"
+          },
           "evidence_validation_status": "succeeded",
           "failure_category": null,
           "execution_mode": "deterministic_fixture",
           "expected_findings": 1,
           "matched_findings": 1,
-          "expected_finding_category": "potential_side_effect",
+          "expected_finding_categories": [
+            "potential_side_effect"
+          ],
+          "actual_finding_categories": [
+            "potential_side_effect"
+          ],
           "finding_category_match": true,
           "evidence_ref_validation_failures": 0,
           "models": [
@@ -988,14 +1393,29 @@
           "expected": "DIFFERENT",
           "actual": "DIFFERENT",
           "verdict_match": true,
-          "verifier_schema_status": "succeeded",
-          "judge_schema_status": "succeeded",
+          "verifier_stage": {
+            "attempts": [
+              "succeeded"
+            ],
+            "final_status": "succeeded"
+          },
+          "judge_stage": {
+            "attempts": [
+              "succeeded"
+            ],
+            "final_status": "succeeded"
+          },
           "evidence_validation_status": "succeeded",
           "failure_category": null,
           "execution_mode": "deterministic_fixture",
           "expected_findings": 1,
           "matched_findings": 1,
-          "expected_finding_category": "potential_side_effect",
+          "expected_finding_categories": [
+            "potential_side_effect"
+          ],
+          "actual_finding_categories": [
+            "potential_side_effect"
+          ],
           "finding_category_match": true,
           "evidence_ref_validation_failures": 0,
           "models": [
@@ -1017,14 +1437,29 @@
           "expected": "DIFFERENT",
           "actual": "DIFFERENT",
           "verdict_match": true,
-          "verifier_schema_status": "succeeded",
-          "judge_schema_status": "succeeded",
+          "verifier_stage": {
+            "attempts": [
+              "succeeded"
+            ],
+            "final_status": "succeeded"
+          },
+          "judge_stage": {
+            "attempts": [
+              "succeeded"
+            ],
+            "final_status": "succeeded"
+          },
           "evidence_validation_status": "succeeded",
           "failure_category": null,
           "execution_mode": "deterministic_fixture",
           "expected_findings": 1,
           "matched_findings": 1,
-          "expected_finding_category": "violated_constraint",
+          "expected_finding_categories": [
+            "violated_constraint"
+          ],
+          "actual_finding_categories": [
+            "violated_constraint"
+          ],
           "finding_category_match": true,
           "evidence_ref_validation_failures": 0,
           "models": [
@@ -1046,14 +1481,29 @@
           "expected": "DIFFERENT",
           "actual": "DIFFERENT",
           "verdict_match": true,
-          "verifier_schema_status": "succeeded",
-          "judge_schema_status": "succeeded",
+          "verifier_stage": {
+            "attempts": [
+              "succeeded"
+            ],
+            "final_status": "succeeded"
+          },
+          "judge_stage": {
+            "attempts": [
+              "succeeded"
+            ],
+            "final_status": "succeeded"
+          },
           "evidence_validation_status": "succeeded",
           "failure_category": null,
           "execution_mode": "deterministic_fixture",
           "expected_findings": 1,
           "matched_findings": 1,
-          "expected_finding_category": "violated_constraint",
+          "expected_finding_categories": [
+            "violated_constraint"
+          ],
+          "actual_finding_categories": [
+            "violated_constraint"
+          ],
           "finding_category_match": true,
           "evidence_ref_validation_failures": 0,
           "models": [
@@ -1075,14 +1525,29 @@
           "expected": "PARTIAL",
           "actual": "PARTIAL",
           "verdict_match": true,
-          "verifier_schema_status": "succeeded",
-          "judge_schema_status": "succeeded",
+          "verifier_stage": {
+            "attempts": [
+              "succeeded"
+            ],
+            "final_status": "succeeded"
+          },
+          "judge_stage": {
+            "attempts": [
+              "succeeded"
+            ],
+            "final_status": "succeeded"
+          },
           "evidence_validation_status": "succeeded",
           "failure_category": null,
           "execution_mode": "deterministic_fixture",
           "expected_findings": 1,
           "matched_findings": 1,
-          "expected_finding_category": "potential_side_effect",
+          "expected_finding_categories": [
+            "potential_side_effect"
+          ],
+          "actual_finding_categories": [
+            "potential_side_effect"
+          ],
           "finding_category_match": true,
           "evidence_ref_validation_failures": 0,
           "models": [
@@ -1104,14 +1569,29 @@
           "expected": "PARTIAL",
           "actual": "PARTIAL",
           "verdict_match": true,
-          "verifier_schema_status": "succeeded",
-          "judge_schema_status": "succeeded",
+          "verifier_stage": {
+            "attempts": [
+              "succeeded"
+            ],
+            "final_status": "succeeded"
+          },
+          "judge_stage": {
+            "attempts": [
+              "succeeded"
+            ],
+            "final_status": "succeeded"
+          },
           "evidence_validation_status": "succeeded",
           "failure_category": null,
           "execution_mode": "deterministic_fixture",
           "expected_findings": 1,
           "matched_findings": 1,
-          "expected_finding_category": "potential_side_effect",
+          "expected_finding_categories": [
+            "potential_side_effect"
+          ],
+          "actual_finding_categories": [
+            "potential_side_effect"
+          ],
           "finding_category_match": true,
           "evidence_ref_validation_failures": 0,
           "models": [
@@ -1133,15 +1613,26 @@
           "expected": "UNCERTAIN",
           "actual": "UNCERTAIN",
           "verdict_match": true,
-          "verifier_schema_status": "succeeded",
-          "judge_schema_status": "succeeded",
+          "verifier_stage": {
+            "attempts": [
+              "succeeded"
+            ],
+            "final_status": "succeeded"
+          },
+          "judge_stage": {
+            "attempts": [
+              "succeeded"
+            ],
+            "final_status": "succeeded"
+          },
           "evidence_validation_status": "succeeded",
           "failure_category": null,
           "execution_mode": "deterministic_fixture",
           "expected_findings": 0,
           "matched_findings": 0,
-          "expected_finding_category": null,
-          "finding_category_match": null,
+          "expected_finding_categories": [],
+          "actual_finding_categories": [],
+          "finding_category_match": true,
           "evidence_ref_validation_failures": 0,
           "models": [
             "fixture-mock",
@@ -1162,15 +1653,26 @@
           "expected": "UNCERTAIN",
           "actual": "UNCERTAIN",
           "verdict_match": true,
-          "verifier_schema_status": "succeeded",
-          "judge_schema_status": "succeeded",
+          "verifier_stage": {
+            "attempts": [
+              "succeeded"
+            ],
+            "final_status": "succeeded"
+          },
+          "judge_stage": {
+            "attempts": [
+              "succeeded"
+            ],
+            "final_status": "succeeded"
+          },
           "evidence_validation_status": "succeeded",
           "failure_category": null,
           "execution_mode": "deterministic_fixture",
           "expected_findings": 0,
           "matched_findings": 0,
-          "expected_finding_category": null,
-          "finding_category_match": null,
+          "expected_finding_categories": [],
+          "actual_finding_categories": [],
+          "finding_category_match": true,
           "evidence_ref_validation_failures": 0,
           "models": [
             "fixture-mock",
@@ -1191,15 +1693,26 @@
           "expected": "UNCERTAIN",
           "actual": "UNCERTAIN",
           "verdict_match": true,
-          "verifier_schema_status": "succeeded",
-          "judge_schema_status": "succeeded",
+          "verifier_stage": {
+            "attempts": [
+              "succeeded"
+            ],
+            "final_status": "succeeded"
+          },
+          "judge_stage": {
+            "attempts": [
+              "succeeded"
+            ],
+            "final_status": "succeeded"
+          },
           "evidence_validation_status": "succeeded",
           "failure_category": null,
           "execution_mode": "deterministic_fixture",
           "expected_findings": 0,
           "matched_findings": 0,
-          "expected_finding_category": null,
-          "finding_category_match": null,
+          "expected_finding_categories": [],
+          "actual_finding_categories": [],
+          "finding_category_match": true,
           "evidence_ref_validation_failures": 0,
           "models": [
             "fixture-mock",
@@ -1220,15 +1733,26 @@
           "expected": "SAME",
           "actual": "SAME",
           "verdict_match": true,
-          "verifier_schema_status": "succeeded",
-          "judge_schema_status": "succeeded",
+          "verifier_stage": {
+            "attempts": [
+              "succeeded"
+            ],
+            "final_status": "succeeded"
+          },
+          "judge_stage": {
+            "attempts": [
+              "succeeded"
+            ],
+            "final_status": "succeeded"
+          },
           "evidence_validation_status": "succeeded",
           "failure_category": null,
           "execution_mode": "deterministic_fixture",
           "expected_findings": 0,
           "matched_findings": 0,
-          "expected_finding_category": null,
-          "finding_category_match": null,
+          "expected_finding_categories": [],
+          "actual_finding_categories": [],
+          "finding_category_match": true,
           "evidence_ref_validation_failures": 0,
           "models": [
             "fixture-mock",
@@ -1249,15 +1773,26 @@
           "expected": "SAME",
           "actual": "SAME",
           "verdict_match": true,
-          "verifier_schema_status": "succeeded",
-          "judge_schema_status": "succeeded",
+          "verifier_stage": {
+            "attempts": [
+              "succeeded"
+            ],
+            "final_status": "succeeded"
+          },
+          "judge_stage": {
+            "attempts": [
+              "succeeded"
+            ],
+            "final_status": "succeeded"
+          },
           "evidence_validation_status": "succeeded",
           "failure_category": null,
           "execution_mode": "deterministic_fixture",
           "expected_findings": 0,
           "matched_findings": 0,
-          "expected_finding_category": null,
-          "finding_category_match": null,
+          "expected_finding_categories": [],
+          "actual_finding_categories": [],
+          "finding_category_match": true,
           "evidence_ref_validation_failures": 0,
           "models": [
             "fixture-mock",
@@ -1278,14 +1813,29 @@
           "expected": "PARTIAL",
           "actual": "PARTIAL",
           "verdict_match": true,
-          "verifier_schema_status": "succeeded",
-          "judge_schema_status": "succeeded",
+          "verifier_stage": {
+            "attempts": [
+              "succeeded"
+            ],
+            "final_status": "succeeded"
+          },
+          "judge_stage": {
+            "attempts": [
+              "succeeded"
+            ],
+            "final_status": "succeeded"
+          },
           "evidence_validation_status": "succeeded",
           "failure_category": null,
           "execution_mode": "deterministic_fixture",
           "expected_findings": 1,
           "matched_findings": 1,
-          "expected_finding_category": "missing_requirement",
+          "expected_finding_categories": [
+            "missing_requirement"
+          ],
+          "actual_finding_categories": [
+            "missing_requirement"
+          ],
           "finding_category_match": true,
           "evidence_ref_validation_failures": 0,
           "models": [
@@ -1307,14 +1857,29 @@
           "expected": "PARTIAL",
           "actual": "PARTIAL",
           "verdict_match": true,
-          "verifier_schema_status": "succeeded",
-          "judge_schema_status": "succeeded",
+          "verifier_stage": {
+            "attempts": [
+              "succeeded"
+            ],
+            "final_status": "succeeded"
+          },
+          "judge_stage": {
+            "attempts": [
+              "succeeded"
+            ],
+            "final_status": "succeeded"
+          },
           "evidence_validation_status": "succeeded",
           "failure_category": null,
           "execution_mode": "deterministic_fixture",
           "expected_findings": 1,
           "matched_findings": 1,
-          "expected_finding_category": "violated_constraint",
+          "expected_finding_categories": [
+            "violated_constraint"
+          ],
+          "actual_finding_categories": [
+            "violated_constraint"
+          ],
           "finding_category_match": true,
           "evidence_ref_validation_failures": 0,
           "models": [
@@ -1336,14 +1901,29 @@
           "expected": "PARTIAL",
           "actual": "PARTIAL",
           "verdict_match": true,
-          "verifier_schema_status": "succeeded",
-          "judge_schema_status": "succeeded",
+          "verifier_stage": {
+            "attempts": [
+              "succeeded"
+            ],
+            "final_status": "succeeded"
+          },
+          "judge_stage": {
+            "attempts": [
+              "succeeded"
+            ],
+            "final_status": "succeeded"
+          },
           "evidence_validation_status": "succeeded",
           "failure_category": null,
           "execution_mode": "deterministic_fixture",
           "expected_findings": 1,
           "matched_findings": 1,
-          "expected_finding_category": "unrequested_change",
+          "expected_finding_categories": [
+            "unrequested_change"
+          ],
+          "actual_finding_categories": [
+            "unrequested_change"
+          ],
           "finding_category_match": true,
           "evidence_ref_validation_failures": 0,
           "models": [

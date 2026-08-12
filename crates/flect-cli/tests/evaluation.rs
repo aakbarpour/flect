@@ -45,8 +45,8 @@ fn offline_suite_is_reproducible_and_never_requires_api_access() {
             .unwrap()
             .iter()
             .all(|case| {
-                case["verifier_schema_status"] == "succeeded"
-                    && case["judge_schema_status"] == "succeeded"
+                case["verifier_stage"]["final_status"] == "succeeded"
+                    && case["judge_stage"]["final_status"] == "succeeded"
                     && case["evidence_validation_status"] == "succeeded"
                     && case["failure_category"].is_null()
             })
@@ -89,7 +89,10 @@ fn benchmark_ground_truth_and_canonical_subset_do_not_drift() {
         let findings = case["expected"]["important_findings"].as_array().unwrap();
         assert_eq!(
             findings.is_empty(),
-            case["expected"]["finding_category"].is_null()
+            case["expected"]["finding_categories"]
+                .as_array()
+                .unwrap()
+                .is_empty()
         );
         assert!(!case["expected"]["rationale"].as_str().unwrap().is_empty());
     }
