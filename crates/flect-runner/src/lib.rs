@@ -138,13 +138,20 @@ pub enum RunnerError {
 #[derive(Debug)]
 pub struct MockRunner {
     responses: Mutex<VecDeque<Value>>,
+    model: String,
 }
 
 impl MockRunner {
     /// Creates a runner that returns the supplied responses in order.
     pub fn new(responses: impl IntoIterator<Item = Value>) -> Self {
+        Self::named("mock", responses)
+    }
+
+    /// Creates a deterministic runner that reports a chosen model name.
+    pub fn named(model: impl Into<String>, responses: impl IntoIterator<Item = Value>) -> Self {
         Self {
             responses: Mutex::new(responses.into_iter().collect()),
+            model: model.into(),
         }
     }
 
@@ -178,7 +185,7 @@ impl AgentRunner for MockRunner {
             value,
             metadata: RunnerMetadata {
                 provider: "mock".to_owned(),
-                model: "mock".to_owned(),
+                model: self.model.clone(),
                 latency_ms: 0,
                 usage: TokenUsage::default(),
             },

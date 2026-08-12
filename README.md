@@ -8,7 +8,7 @@ It gives an independent verifier the patch without the original task, reconstruc
 
 Tests ask whether the code works. Flect asks whether you built the right thing.
 
-> **Project status:** Milestones 0, 1, and the core Milestone 2 semantic pipeline are implemented. Flect can run deterministic offline verification or use an OpenAI-compatible Responses endpoint for forward analysis, structurally blind reconstruction, and semantic reconciliation. Model fallback, integrations, evaluation, and release packaging remain in progress.
+> **Project status:** Milestones 0, 1, and the core Milestone 2 semantic pipeline are implemented. Flect can run deterministic offline verification or use an OpenAI-compatible Responses endpoint for forward analysis, structurally blind reconstruction, semantic reconciliation, and bounded model escalation. Integrations, evaluation, and release packaging remain in progress.
 
 ## How it works
 
@@ -103,6 +103,10 @@ model = "gpt-5.6-luna"
 fallback_model = "gpt-5.6-terra"
 reasoning_effort = "medium"
 timeout_seconds = 120
+escalate_on_uncertain = true
+confidence_threshold = 0.65
+complexity_file_threshold = 12
+complexity_byte_threshold = 200000
 ```
 
 Set the named environment variable outside the configuration file. `flect doctor` reports whether it is present without printing its value. With `kind = "api"`, `flect start` generates the forward specification, `flect echo` performs blind reconstruction, and `flect verify` performs blind reconstruction followed by semantic reconciliation. Provider, model, latency, and reported token usage are persisted with the relevant run or verification result; credential values are not.
@@ -114,7 +118,7 @@ flect verify --dry-run
 flect --json verify --dry-run
 ```
 
-Dry-run output includes the provider, model, context policy, included patch/context files, and excluded paths. It never initializes the API runner or reads the credential value.
+Dry-run output includes the provider, model, context policy, included patch/context files, and excluded paths. It never initializes the API runner or reads the credential value. See [model routing and cost estimates](docs/model-routing.md) for fallback signals, request limits, and the versioned pricing table.
 
 ## Commands
 

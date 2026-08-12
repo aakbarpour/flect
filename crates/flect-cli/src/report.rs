@@ -8,7 +8,15 @@ pub fn run_created(run: &RunRecord) {
     println!("Run      {}", run.id);
     println!("Base     {}", short_revision(&run.base_revision));
     println!("Task     captured");
-    println!("Spec     captured deterministically\n");
+    println!(
+        "Spec     captured {}\n",
+        if run.model_calls.is_empty() {
+            "deterministically"
+        } else {
+            "semantically"
+        }
+    );
+    model_calls(&run.model_calls);
     println!("Ready for implementation.");
 }
 
@@ -48,6 +56,7 @@ pub fn verification(record: &VerificationRecord) {
         "Recommended action\n\n  {}",
         record.verdict.recommended_action
     );
+    model_calls(&record.model_calls);
 }
 
 pub fn echo(echoed: &EchoedSpec) {
@@ -191,4 +200,29 @@ pub fn doctor(value: &Value) {
 
 fn short_revision(revision: &str) -> &str {
     revision.get(..8).unwrap_or(revision)
+}
+
+fn model_calls(calls: &[flect_core::ModelCallRecord]) {
+    if calls.is_empty() {
+        return;
+    }
+    println!("\nModel routing");
+    for call in calls {
+        println!(
+            "  {} attempt {}  {}  {}{}",
+            call.stage,
+            call.attempt,
+            call.model,
+            if call.accepted {
+                "accepted"
+            } else {
+                "escalated"
+            },
+            call.estimated_cost_usd
+                .map_or_else(String::new, |cost| { format!("  estimated ${cost:.6}") })
+        );
+        if let Some(reason) = &call.escalation_reason {
+            println!("    {reason}");
+        }
+    }
 }

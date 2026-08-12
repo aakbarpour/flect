@@ -4,8 +4,9 @@ use std::fs;
 use std::io::{self, IsTerminal, Read, Write};
 use std::path::Path;
 use std::process::Command as ProcessCommand;
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
+use flect_core::config::RunnerConfig;
 use flect_core::{
     BlindBundle, BlindGuard, Config, ContextBuilder, ContextPolicy, EchoedSpec, Evidence,
     FileStatus, GitRepository, IntendedSpec, ModelCallRecord, RunRecord, RunStore, RunnerKind,
@@ -13,7 +14,7 @@ use flect_core::{
 };
 use flect_runner::{
     AgentRequest, AgentRunner, MockRunner, OpenAiResponsesConfig, OpenAiResponsesRunner,
-    RequestPurpose, RunnerMetadata,
+    RequestPurpose, RunnerError, RunnerMetadata,
 };
 use miette::{IntoDiagnostic, Result, WrapErr, miette};
 use schemars::{JsonSchema, schema_for};
@@ -22,6 +23,40 @@ use serde_json::{Value, json};
 
 use crate::Command;
 use crate::report;
+
+const PRICING_VERSION: &str = "openai-2026-08-12";
+const PRICING_TABLE: &[ModelPrice] = &[
+    ModelPrice {
+        model: "gpt-5.6-luna",
+        input_per_million: 1.0,
+        cached_input_per_million: 0.1,
+        output_per_million: 6.0,
+    },
+    ModelPrice {
+        model: "gpt-5.6-terra",
+        input_per_million: 2.5,
+        cached_input_per_million: 0.25,
+        output_per_million: 15.0,
+    },
+];
+
+struct ModelPrice {
+    model: &'static str,
+    input_per_million: f64,
+    cached_input_per_million: f64,
+    output_per_million: f64,
+}
+
+struct RoutedOutput<T> {
+    value: T,
+    attempts: Vec<AttemptRecord>,
+}
+
+struct AttemptRecord {
+    metadata: RunnerMetadata,
+    accepted: bool,
+    escalation_reason: Option<String>,
+}
 
 pub async fn run(command: Command, json_output: bool) -> Result<()> {
     match command {
@@ -137,14 +172,16 @@ async fn start(
             (IntendedSpec::from_task(&task), Vec::new())
         }
         None => {
-            let runner = api_runner(&config)?;
-            let (spec, metadata) = generate_typed(
-                &runner,
+            let output = generate_api::<IntendedSpec>(
+                &config,
                 RequestPurpose::AnalyzeForwardIntent,
                 serde_json::to_value(&task).into_diagnostic()?,
             )
             .await?;
-            (spec, vec![model_call("forward", metadata)])
+            (
+                output.value,
+                model_calls("forward", output.attempts, &config),
+            )
         }
     };
     let now = unix_millis()?;
@@ -200,14 +237,13 @@ async fn verify(
     let (mut verdict, reconciliation_metadata) =
         reconcile_semantically(&config, &run.intended_spec, &echoed, &bundle).await?;
     validate_evidence(&mut verdict, &bundle);
-    let model_calls = backward_metadata
+    let model_calls = model_calls("backward", backward_metadata, &config)
         .into_iter()
-        .map(|metadata| model_call("backward", metadata))
-        .chain(
-            reconciliation_metadata
-                .into_iter()
-                .map(|metadata| model_call("reconciliation", metadata)),
-        )
+        .chain(model_calls(
+            "reconciliation",
+            reconciliation_metadata,
+            &config,
+        ))
         .collect();
     let record = VerificationRecord {
         version: 1,
@@ -249,7 +285,7 @@ async fn echo(
         print_json(&json!({
             "bundle_manifest": bundle.manifest,
             "echoed_spec": echoed,
-            "model_call": metadata.map(|value| model_call("backward", value)),
+            "model_calls": model_calls("backward", metadata, &config),
         }))?;
     } else {
         report::echo(&echoed);
@@ -361,7 +397,7 @@ async fn reconstruct(
     config: &Config,
     bundle: &BlindBundle,
     echoed_spec_path: Option<&Path>,
-) -> Result<(EchoedSpec, Option<RunnerMetadata>)> {
+) -> Result<(EchoedSpec, Vec<AttemptRecord>)> {
     if let Some(path) = echoed_spec_path {
         let response: EchoedSpec = read_json_file(path)?;
         let runner = MockRunner::with_response(&response).map_err(to_report)?;
@@ -371,19 +407,18 @@ async fn reconstruct(
             blind_input(bundle)?,
         )
         .await?;
-        return Ok((echoed, None));
+        return Ok((echoed, Vec::new()));
     }
     if config.runner.kind == RunnerKind::Mock {
-        return Ok((deterministic_echo(bundle), None));
+        return Ok((deterministic_echo(bundle), Vec::new()));
     }
-    let runner = api_runner(config)?;
-    let (echoed, metadata) = generate_typed(
-        &runner,
+    let output = generate_api::<EchoedSpec>(
+        config,
         RequestPurpose::ReconstructPatchIntent,
         blind_input(bundle)?,
     )
     .await?;
-    Ok((echoed, Some(metadata)))
+    Ok((output.value, output.attempts))
 }
 
 async fn reconcile_semantically(
@@ -391,19 +426,17 @@ async fn reconcile_semantically(
     intended: &IntendedSpec,
     echoed: &EchoedSpec,
     bundle: &BlindBundle,
-) -> Result<(Verdict, Option<RunnerMetadata>)> {
+) -> Result<(Verdict, Vec<AttemptRecord>)> {
     if config.runner.kind == RunnerKind::Mock {
-        return Ok((reconcile(intended, echoed), None));
+        return Ok((reconcile(intended, echoed), Vec::new()));
     }
-    let runner = api_runner(config)?;
     let input = json!({
         "intended_spec": intended,
         "echoed_spec": echoed,
         "available_evidence": bundle.patch.files,
     });
-    let (verdict, metadata) =
-        generate_typed(&runner, RequestPurpose::ReconcileIntent, input).await?;
-    Ok((verdict, Some(metadata)))
+    let output = generate_api::<Verdict>(config, RequestPurpose::ReconcileIntent, input).await?;
+    Ok((output.value, output.attempts))
 }
 
 fn blind_input(bundle: &BlindBundle) -> Result<Value> {
@@ -456,32 +489,304 @@ fn make_objects_strict(value: &mut Value) {
     }
 }
 
-fn api_runner(config: &Config) -> Result<OpenAiResponsesRunner> {
-    let model = config
+async fn generate_api<T>(
+    config: &Config,
+    purpose: RequestPurpose,
+    input: Value,
+) -> Result<RoutedOutput<T>>
+where
+    T: DeserializeOwned + JsonSchema,
+{
+    let primary_model = config
         .runner
         .model
-        .clone()
+        .as_deref()
         .ok_or_else(|| miette!("runner.model is required for the API runner"))?;
+    let primary = api_runner(config, primary_model)?;
+    let fallback_model = config
+        .runner
+        .fallback_model
+        .as_deref()
+        .filter(|model| *model != primary_model);
+    let fallback = fallback_model
+        .map(|model| api_runner(config, model))
+        .transpose()?;
+    let fallback_candidate = fallback
+        .as_ref()
+        .zip(fallback_model)
+        .map(|(runner, model)| (runner as &dyn AgentRunner, model));
+    generate_routed(
+        &primary,
+        primary_model,
+        fallback_candidate,
+        purpose,
+        input,
+        &config.runner,
+    )
+    .await
+}
+
+async fn generate_routed<T>(
+    primary: &dyn AgentRunner,
+    primary_model: &str,
+    fallback: Option<(&dyn AgentRunner, &str)>,
+    purpose: RequestPurpose,
+    input: Value,
+    config: &RunnerConfig,
+) -> Result<RoutedOutput<T>>
+where
+    T: DeserializeOwned + JsonSchema,
+{
+    let request = AgentRequest { purpose, input };
+    let schema = strict_schema::<T>()?;
+    let complexity = complexity_signal(&request.input, config);
+    let started = Instant::now();
+    let primary_result = primary.generate_structured(&request, &schema).await;
+    let (primary_output, primary_decode_error) = match primary_result {
+        Ok(output) => {
+            let decode_error = serde_json::from_value::<T>(output.value.clone())
+                .err()
+                .map(|error| format!("malformed domain output: {error}"));
+            (output, decode_error)
+        }
+        Err(error) => {
+            if config.escalate_on_uncertain && malformed_output_error(&error) {
+                if let Some(fallback) = fallback {
+                    let reason = format!("primary output failure: {error}");
+                    let primary_attempt = AttemptRecord {
+                        metadata: failed_metadata(primary_model, started),
+                        accepted: false,
+                        escalation_reason: Some(reason.clone()),
+                    };
+                    return fallback_attempt(
+                        fallback,
+                        &request,
+                        &schema,
+                        vec![primary_attempt],
+                        reason,
+                    )
+                    .await;
+                }
+            }
+            return Err(to_report(error));
+        }
+    };
+    let signal = primary_decode_error
+        .or(complexity)
+        .or_else(|| output_signal(&primary_output.value, config.confidence_threshold));
+    if config.escalate_on_uncertain {
+        if let (Some(reason), Some(fallback)) = (signal.clone(), fallback) {
+            let primary_attempt = AttemptRecord {
+                metadata: primary_output.metadata,
+                accepted: false,
+                escalation_reason: Some(reason.clone()),
+            };
+            return fallback_attempt(fallback, &request, &schema, vec![primary_attempt], reason)
+                .await;
+        }
+    }
+    let value = serde_json::from_value(primary_output.value)
+        .into_diagnostic()
+        .wrap_err("runner response did not match the requested domain schema")?;
+    Ok(RoutedOutput {
+        value,
+        attempts: vec![AttemptRecord {
+            metadata: primary_output.metadata,
+            accepted: true,
+            escalation_reason: signal,
+        }],
+    })
+}
+
+async fn fallback_attempt<T>(
+    fallback: (&dyn AgentRunner, &str),
+    request: &AgentRequest,
+    schema: &Value,
+    mut attempts: Vec<AttemptRecord>,
+    reason: String,
+) -> Result<RoutedOutput<T>>
+where
+    T: DeserializeOwned,
+{
+    let started = Instant::now();
+    let output = fallback
+        .0
+        .generate_structured(request, schema)
+        .await
+        .map_err(|error| {
+            miette!(
+                "fallback model `{}` failed after escalation ({reason}): {error}",
+                fallback.1
+            )
+        })?;
+    let value = serde_json::from_value(output.value)
+        .into_diagnostic()
+        .wrap_err_with(|| {
+            format!(
+                "fallback model `{}` returned malformed domain output after escalation ({reason})",
+                fallback.1
+            )
+        })?;
+    let mut metadata = output.metadata;
+    if metadata.latency_ms == 0 {
+        metadata.latency_ms = elapsed_millis(started);
+    }
+    attempts.push(AttemptRecord {
+        metadata,
+        accepted: true,
+        escalation_reason: Some(reason),
+    });
+    Ok(RoutedOutput { value, attempts })
+}
+
+fn complexity_signal(input: &Value, config: &RunnerConfig) -> Option<String> {
+    let file_count = input
+        .pointer("/patch/files")
+        .or_else(|| input.get("available_evidence"))
+        .and_then(Value::as_array)
+        .map_or(0, Vec::len);
+    if file_count >= config.complexity_file_threshold {
+        return Some(format!(
+            "complexity signal: {file_count} files meets the configured threshold of {}",
+            config.complexity_file_threshold
+        ));
+    }
+    let payload_bytes = serde_json::to_vec(input).map_or(u64::MAX, |bytes| bytes.len() as u64);
+    (payload_bytes >= config.complexity_byte_threshold).then(|| {
+        format!(
+            "complexity signal: {payload_bytes} input bytes meets the configured threshold of {}",
+            config.complexity_byte_threshold
+        )
+    })
+}
+
+fn output_signal(output: &Value, confidence_threshold: f64) -> Option<String> {
+    if output
+        .get("confidence")
+        .and_then(Value::as_f64)
+        .is_some_and(|confidence| confidence < confidence_threshold)
+    {
+        return Some(format!(
+            "confidence is below the advisory threshold of {confidence_threshold:.2}"
+        ));
+    }
+    if output.get("alignment").and_then(Value::as_str) == Some("UNCERTAIN") {
+        return Some("primary result is UNCERTAIN".to_owned());
+    }
+    if output
+        .get("uncertainties")
+        .and_then(Value::as_array)
+        .is_some_and(|values| !values.is_empty())
+    {
+        return Some("primary result contains explicit uncertainties".to_owned());
+    }
+    let has_negative_findings = [
+        "missing_requirements",
+        "unrequested_changes",
+        "violated_constraints",
+        "potential_side_effects",
+    ]
+    .iter()
+    .any(|field| {
+        output
+            .get(*field)
+            .and_then(Value::as_array)
+            .is_some_and(|values| !values.is_empty())
+    });
+    if has_negative_findings
+        && output
+            .get("evidence")
+            .and_then(Value::as_array)
+            .is_none_or(Vec::is_empty)
+    {
+        return Some("primary result has negative findings without structured evidence".to_owned());
+    }
+    None
+}
+
+fn malformed_output_error(error: &RunnerError) -> bool {
+    matches!(
+        error,
+        RunnerError::InvalidJson(_)
+            | RunnerError::SchemaValidation(_)
+            | RunnerError::MissingOutput
+            | RunnerError::Incomplete(_)
+            | RunnerError::Refusal(_)
+    )
+}
+
+fn failed_metadata(model: &str, started: Instant) -> RunnerMetadata {
+    RunnerMetadata {
+        provider: "openai-compatible".to_owned(),
+        model: model.to_owned(),
+        latency_ms: elapsed_millis(started),
+        usage: flect_runner::TokenUsage::default(),
+    }
+}
+
+fn elapsed_millis(started: Instant) -> u64 {
+    u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX)
+}
+
+fn api_runner(config: &Config, model: &str) -> Result<OpenAiResponsesRunner> {
     OpenAiResponsesRunner::from_env(OpenAiResponsesConfig {
         base_url: config.runner.base_url.clone(),
         api_key_env: config.runner.api_key_env.clone(),
-        model,
+        model: model.to_owned(),
         reasoning_effort: config.runner.reasoning_effort.clone(),
         timeout: Duration::from_secs(config.runner.timeout_seconds),
     })
     .map_err(to_report)
 }
 
-fn model_call(stage: &str, metadata: RunnerMetadata) -> ModelCallRecord {
-    ModelCallRecord {
-        stage: stage.to_owned(),
-        provider: metadata.provider,
-        model: metadata.model,
-        latency_ms: metadata.latency_ms,
-        input_tokens: metadata.usage.input_tokens,
-        cached_input_tokens: metadata.usage.cached_input_tokens,
-        output_tokens: metadata.usage.output_tokens,
+fn model_calls(stage: &str, attempts: Vec<AttemptRecord>, config: &Config) -> Vec<ModelCallRecord> {
+    attempts
+        .into_iter()
+        .enumerate()
+        .map(|(index, attempt)| {
+            let cost = estimate_cost(&attempt.metadata, &config.runner.base_url);
+            ModelCallRecord {
+                stage: stage.to_owned(),
+                attempt: u32::try_from(index + 1).unwrap_or(u32::MAX),
+                accepted: attempt.accepted,
+                provider: attempt.metadata.provider,
+                model: attempt.metadata.model,
+                latency_ms: attempt.metadata.latency_ms,
+                input_tokens: attempt.metadata.usage.input_tokens,
+                cached_input_tokens: attempt.metadata.usage.cached_input_tokens,
+                output_tokens: attempt.metadata.usage.output_tokens,
+                estimated_cost_usd: cost,
+                pricing_version: cost.map(|_| PRICING_VERSION.to_owned()),
+                escalation_reason: attempt.escalation_reason,
+            }
+        })
+        .collect()
+}
+
+fn estimate_cost(metadata: &RunnerMetadata, base_url: &str) -> Option<f64> {
+    if !base_url
+        .trim_end_matches('/')
+        .eq_ignore_ascii_case("https://api.openai.com/v1")
+    {
+        return None;
     }
+    let price = PRICING_TABLE
+        .iter()
+        .find(|price| price.model == metadata.model)?;
+    let input = metadata.usage.input_tokens?;
+    let cached = metadata.usage.cached_input_tokens.unwrap_or(0).min(input);
+    let output = metadata.usage.output_tokens?;
+    let uncached = input.saturating_sub(cached);
+    let long_context = input > 272_000;
+    let uncached = f64::from(u32::try_from(uncached).ok()?);
+    let cached = f64::from(u32::try_from(cached).ok()?);
+    let output = f64::from(u32::try_from(output).ok()?);
+    Some(
+        ((uncached * price.input_per_million * if long_context { 2.0 } else { 1.0 })
+            + (cached * price.cached_input_per_million * if long_context { 2.0 } else { 1.0 })
+            + (output * price.output_per_million * if long_context { 1.5 } else { 1.0 }))
+            / 1_000_000.0,
+    )
 }
 
 fn verification_dry_run(config: &Config, bundle: &BlindBundle, json_output: bool) -> Result<()> {
@@ -492,6 +797,7 @@ fn verification_dry_run(config: &Config, bundle: &BlindBundle, json_output: bool
             "kind": config.runner.kind.to_string(),
             "provider": if config.runner.kind == RunnerKind::Api { "openai-compatible" } else { "mock" },
             "model": config.runner.model,
+            "fallback_model": config.runner.fallback_model,
         },
         "context_policy": bundle.manifest.context_policy,
         "included": {
@@ -873,5 +1179,156 @@ mod tests {
                 .iter()
                 .any(|evidence| evidence.description == "Missing validation")
         );
+    }
+
+    fn echoed(confidence: f64, uncertainties: Vec<String>) -> EchoedSpec {
+        EchoedSpec {
+            apparent_objective: "Validate input".to_owned(),
+            behavior_after: vec!["Input is validated".to_owned()],
+            uncertainties,
+            confidence,
+            ..EchoedSpec::default()
+        }
+    }
+
+    #[tokio::test]
+    async fn confident_luna_result_does_not_invoke_terra() {
+        let primary = MockRunner::named(
+            "gpt-5.6-luna",
+            [serde_json::to_value(echoed(0.9, Vec::new())).unwrap()],
+        );
+        let fallback = MockRunner::named(
+            "gpt-5.6-terra",
+            [serde_json::to_value(echoed(0.95, Vec::new())).unwrap()],
+        );
+        let result = generate_routed::<EchoedSpec>(
+            &primary,
+            "gpt-5.6-luna",
+            Some((&fallback, "gpt-5.6-terra")),
+            RequestPurpose::ReconstructPatchIntent,
+            json!({"patch": {"files": []}}),
+            &RunnerConfig::default(),
+        )
+        .await
+        .unwrap();
+        assert_eq!(result.attempts.len(), 1);
+        assert_eq!(result.attempts[0].metadata.model, "gpt-5.6-luna");
+        assert!(result.attempts[0].accepted);
+    }
+
+    #[tokio::test]
+    async fn low_confidence_escalates_from_luna_to_terra_once() {
+        let primary = MockRunner::named(
+            "gpt-5.6-luna",
+            [serde_json::to_value(echoed(0.4, Vec::new())).unwrap()],
+        );
+        let fallback = MockRunner::named(
+            "gpt-5.6-terra",
+            [serde_json::to_value(echoed(0.9, Vec::new())).unwrap()],
+        );
+        let result = generate_routed::<EchoedSpec>(
+            &primary,
+            "gpt-5.6-luna",
+            Some((&fallback, "gpt-5.6-terra")),
+            RequestPurpose::ReconstructPatchIntent,
+            json!({"patch": {"files": []}}),
+            &RunnerConfig::default(),
+        )
+        .await
+        .unwrap();
+        assert_eq!(result.attempts.len(), 2);
+        assert!(!result.attempts[0].accepted);
+        assert!(result.attempts[1].accepted);
+        assert_eq!(result.attempts[1].metadata.model, "gpt-5.6-terra");
+        assert!(
+            result.attempts[1]
+                .escalation_reason
+                .as_deref()
+                .is_some_and(|reason| reason.contains("confidence"))
+        );
+        let records = model_calls("backward", result.attempts, &Config::default());
+        assert_eq!(records.len(), 2);
+        assert_eq!(records[0].attempt, 1);
+        assert!(!records[0].accepted);
+        assert_eq!(records[1].attempt, 2);
+        assert!(records[1].accepted);
+    }
+
+    #[tokio::test]
+    async fn malformed_primary_output_escalates_once() {
+        let primary = MockRunner::named("gpt-5.6-luna", [json!({"wrong": true})]);
+        let fallback = MockRunner::named(
+            "gpt-5.6-terra",
+            [serde_json::to_value(echoed(0.9, Vec::new())).unwrap()],
+        );
+        let result = generate_routed::<EchoedSpec>(
+            &primary,
+            "gpt-5.6-luna",
+            Some((&fallback, "gpt-5.6-terra")),
+            RequestPurpose::ReconstructPatchIntent,
+            json!({"patch": {"files": []}}),
+            &RunnerConfig::default(),
+        )
+        .await
+        .unwrap();
+        assert_eq!(result.attempts.len(), 2);
+        assert!(result.attempts[1].accepted);
+    }
+
+    #[tokio::test]
+    async fn configured_complexity_signal_escalates_once() {
+        let primary = MockRunner::named(
+            "gpt-5.6-luna",
+            [serde_json::to_value(echoed(0.9, Vec::new())).unwrap()],
+        );
+        let fallback = MockRunner::named(
+            "gpt-5.6-terra",
+            [serde_json::to_value(echoed(0.9, Vec::new())).unwrap()],
+        );
+        let config = RunnerConfig {
+            complexity_file_threshold: 1,
+            ..RunnerConfig::default()
+        };
+        let result = generate_routed::<EchoedSpec>(
+            &primary,
+            "gpt-5.6-luna",
+            Some((&fallback, "gpt-5.6-terra")),
+            RequestPurpose::ReconstructPatchIntent,
+            json!({"patch": {"files": [{"path": "src/lib.rs"}]}}),
+            &config,
+        )
+        .await
+        .unwrap();
+        assert_eq!(result.attempts.len(), 2);
+        assert!(
+            result.attempts[0]
+                .escalation_reason
+                .as_deref()
+                .is_some_and(|reason| reason.contains("complexity signal"))
+        );
+    }
+
+    #[test]
+    fn estimates_only_versioned_known_openai_pricing() {
+        let metadata = RunnerMetadata {
+            provider: "openai-compatible".to_owned(),
+            model: "gpt-5.6-luna".to_owned(),
+            latency_ms: 1,
+            usage: flect_runner::TokenUsage {
+                input_tokens: Some(100_000),
+                cached_input_tokens: Some(50_000),
+                output_tokens: Some(10_000),
+            },
+        };
+        assert_eq!(
+            estimate_cost(&metadata, "https://api.openai.com/v1"),
+            Some(0.115)
+        );
+        assert_eq!(estimate_cost(&metadata, "https://example.com/v1"), None);
+        let unknown = RunnerMetadata {
+            model: "custom-model".to_owned(),
+            ..metadata
+        };
+        assert_eq!(estimate_cost(&unknown, "https://api.openai.com/v1"), None);
     }
 }
