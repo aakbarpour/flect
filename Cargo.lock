@@ -356,7 +356,6 @@ name = "flect-app"
 version = "0.1.0"
 dependencies = [
  "flect-core",
- "jsonschema",
  "schemars",
  "serde",
  "serde_json",

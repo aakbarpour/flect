@@ -195,114 +195,114 @@ fn external_verifier_submission_is_path_only_strict_and_single_use() {
     )
     .unwrap();
     let blind = service.prepare_blind(None, None).unwrap();
-    let submission_file = Path::new(&blind.submission_file);
+    let verifier =
+        flect_app::ExternalVerifierService::new_for_tests(&workspace.path().join("jobs")).unwrap();
 
-    assert!(!submission_file.starts_with(repository.path()));
-    assert_ne!(
-        submission_file.parent().unwrap(),
-        Path::new(&blind.workspace)
+    // The child-facing service is external and has neither repository discovery nor JSON input.
+    assert!(!Path::new(&blind.workspace).starts_with(repository.path()));
+    assert!(
+        serde_json::to_value(&blind)
+            .unwrap()
+            .get("submission_file")
+            .is_none()
     );
-    assert!(submission_file.exists());
-
-    let wrong_directory = tempfile::tempdir().unwrap();
-    let wrong_path = wrong_directory
-        .path()
-        .join(format!("{}.submission.json", blind.job_id));
-    fs::write(&wrong_path, "{}").unwrap();
     assert!(matches!(
-        service.submit_echo_file(&wrong_path),
-        Err(AgentWorkflowError::SubmissionFileMismatch(_))
+        verifier.begin("blind_0000000000000000", None, AgentModelSelection::Unknown),
+        Err(AgentWorkflowError::JobNotFound(_))
     ));
-
-    fs::write(
-        submission_file,
-        serde_json::to_vec(&BlindAgentSubmission {
-            job_id: "blind_0000000000000000".to_owned(),
-            echoed_spec: EchoedSpec::default(),
-            model: None,
-            model_selection: AgentModelSelection::Unknown,
-        })
-        .unwrap(),
-    )
-    .unwrap();
+    verifier
+        .begin(
+            &blind.job_id,
+            Some("gpt-5.6-terra".to_owned()),
+            AgentModelSelection::Explicit,
+        )
+        .unwrap();
     assert!(matches!(
-        service.submit_echo_file(submission_file),
-        Err(AgentWorkflowError::JobMismatch(_))
-    ));
-
-    fs::write(submission_file, "{").unwrap();
-    assert!(matches!(
-        service.submit_echo_file(submission_file),
-        Err(AgentWorkflowError::InvalidState(_))
-    ));
-
-    fs::write(
-        submission_file,
-        format!(r#"{{"job_id":"{}","echoed_spec":{{}}}}"#, blind.job_id),
-    )
-    .unwrap();
-    assert!(matches!(
-        service.submit_echo_file(submission_file),
-        Err(AgentWorkflowError::InvalidState(_))
-    ));
-
-    fs::write(
-        submission_file,
-        format!(
-            r#"{{"job_id":"{}","echoed_spec":{{}},"model":null,"model_selection":"unknown","extra":true}}"#,
-            blind.job_id
-        ),
-    )
-    .unwrap();
-    assert!(matches!(
-        service.submit_echo_file(submission_file),
-        Err(AgentWorkflowError::InvalidState(_))
-    ));
-
-    fs::write(
-        submission_file,
-        serde_json::to_vec(&BlindAgentSubmission {
-            job_id: blind.job_id.clone(),
-            echoed_spec: EchoedSpec {
-                affected_scope: vec![AffectedScope {
-                    file: "invented.rs".to_owned(),
-                    symbol: None,
-                }],
-                ..EchoedSpec::default()
-            },
-            model: None,
-            model_selection: AgentModelSelection::Unknown,
-        })
-        .unwrap(),
-    )
-    .unwrap();
-    assert!(matches!(
-        service.submit_echo_file(submission_file),
+        verifier.add_scope(&blind.job_id, "invented.rs".to_owned(), None),
         Err(AgentWorkflowError::UnavailableScope(_))
     ));
-
-    fs::write(
-        submission_file,
-        serde_json::to_vec(&BlindAgentSubmission {
-            job_id: blind.job_id.clone(),
-            echoed_spec: EchoedSpec {
-                affected_scope: vec![AffectedScope {
-                    file: "app.txt".to_owned(),
-                    symbol: None,
-                }],
-                ..EchoedSpec::default()
-            },
-            model: Some("gpt-5.6-terra".to_owned()),
-            model_selection: AgentModelSelection::Explicit,
-        })
-        .unwrap(),
-    )
-    .unwrap();
-    assert!(service.submit_echo_file(submission_file).is_ok());
+    assert!(verifier.set_confidence(&blind.job_id, f64::NAN).is_err());
+    verifier
+        .set_objective(&blind.job_id, "App behavior changes.".to_owned())
+        .unwrap();
+    verifier
+        .add_text(
+            &blind.job_id,
+            flect_app::VerifierTextField::Before,
+            "Old behavior.".to_owned(),
+        )
+        .unwrap();
+    verifier
+        .add_text(
+            &blind.job_id,
+            flect_app::VerifierTextField::Before,
+            "Earlier callers saw the original result.".to_owned(),
+        )
+        .unwrap();
+    verifier
+        .add_text(
+            &blind.job_id,
+            flect_app::VerifierTextField::After,
+            "New behavior.".to_owned(),
+        )
+        .unwrap();
+    verifier
+        .add_text(
+            &blind.job_id,
+            flect_app::VerifierTextField::After,
+            "Later callers see the changed result.".to_owned(),
+        )
+        .unwrap();
+    verifier
+        .add_scope(&blind.job_id, "app.txt".to_owned(), Some("run".to_owned()))
+        .unwrap();
+    verifier
+        .add_scope(
+            &blind.job_id,
+            "app.txt".to_owned(),
+            Some("result".to_owned()),
+        )
+        .unwrap();
+    verifier
+        .add_text(
+            &blind.job_id,
+            flect_app::VerifierTextField::SideEffect,
+            "Callers observe new behavior.".to_owned(),
+        )
+        .unwrap();
+    verifier
+        .add_text(
+            &blind.job_id,
+            flect_app::VerifierTextField::SideEffect,
+            "Observers receive the updated result.".to_owned(),
+        )
+        .unwrap();
+    verifier
+        .add_text(
+            &blind.job_id,
+            flect_app::VerifierTextField::Assumption,
+            "The file is representative.".to_owned(),
+        )
+        .unwrap();
+    verifier
+        .add_text(
+            &blind.job_id,
+            flect_app::VerifierTextField::Uncertainty,
+            "Callers are not shown.".to_owned(),
+        )
+        .unwrap();
+    verifier.set_confidence(&blind.job_id, 0.9).unwrap();
+    verifier.submit(&blind.job_id).unwrap();
     assert!(matches!(
-        service.submit_echo_file(submission_file),
+        verifier.submit(&blind.job_id),
         Err(AgentWorkflowError::InvalidJobState(_))
     ));
+    // The parent supplies only the job ID; it never reads the typed semantic values.
+    let echoed = service.verifier_commit(&blind.job_id).unwrap();
+    assert_eq!(echoed.behavior_before.len(), 2);
+    assert_eq!(echoed.behavior_after.len(), 2);
+    assert_eq!(echoed.affected_scope.len(), 2);
+    assert_eq!(echoed.side_effects.len(), 2);
 }
 
 #[test]

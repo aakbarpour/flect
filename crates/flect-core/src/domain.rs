@@ -431,8 +431,6 @@ pub struct BlindAgentJob {
     pub run_id: String,
     pub isolation: IsolationLevel,
     pub workspace: String,
-    /// Flect-owned writable path where the verifier writes one strict submission.
-    pub submission_file: String,
     pub instructions: String,
     pub bundle: BlindBundle,
     pub echoed_spec_schema: serde_json::Value,

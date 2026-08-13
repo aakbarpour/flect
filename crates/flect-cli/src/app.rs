@@ -455,6 +455,9 @@ fn config(command: &ConfigCommand, json_output: bool) -> Result<()> {
 }
 
 fn agent(command: &AgentCommand, _json_output: bool) -> Result<()> {
+    if let Some(value) = external_verifier_command(command)? {
+        return print_json(&value);
+    }
     let current = std::env::current_dir().into_diagnostic()?;
     let service = flect_app::AgentService::discover(&current).map_err(to_report)?;
     let value = match command {
@@ -463,8 +466,8 @@ fn agent(command: &AgentCommand, _json_output: bool) -> Result<()> {
                 .prepare_blind(run.as_deref(), *context)
                 .map_err(to_report)?,
         ),
-        AgentCommand::SubmitEcho { submission } => {
-            serde_json::to_value(service.submit_echo_file(submission).map_err(to_report)?)
+        AgentCommand::VerifierCommit { job } => {
+            serde_json::to_value(service.verifier_commit(job).map_err(to_report)?)
         }
         AgentCommand::PrepareReconciliation { blind_job } => serde_json::to_value(
             service
@@ -523,9 +526,125 @@ fn agent(command: &AgentCommand, _json_output: bool) -> Result<()> {
                 })
                 .map_err(to_report)?,
         ),
+        AgentCommand::VerifierBegin { .. }
+        | AgentCommand::VerifierSetObjective { .. }
+        | AgentCommand::VerifierAddBefore { .. }
+        | AgentCommand::VerifierAddAfter { .. }
+        | AgentCommand::VerifierAddScope { .. }
+        | AgentCommand::VerifierAddSideEffect { .. }
+        | AgentCommand::VerifierAddAssumption { .. }
+        | AgentCommand::VerifierAddUncertainty { .. }
+        | AgentCommand::VerifierSetConfidence { .. }
+        | AgentCommand::VerifierSubmit { .. } => {
+            unreachable!("handled before repository discovery")
+        }
     }
     .into_diagnostic()?;
     print_json(&value)
+}
+
+fn external_verifier_command(command: &AgentCommand) -> Result<Option<serde_json::Value>> {
+    use flect_app::{ExternalVerifierService, VerifierTextField};
+
+    let service = ExternalVerifierService::discover().map_err(to_report)?;
+    let collecting = |job: &str| Ok(Some(json!({"job_id": job, "status": "collecting"})));
+    match command {
+        AgentCommand::VerifierBegin {
+            job,
+            model,
+            model_selection,
+        } => {
+            service
+                .begin(job, model.clone(), (*model_selection).into())
+                .map_err(to_report)?;
+            collecting(job)
+        }
+        AgentCommand::VerifierSetObjective { job, text_file } => {
+            service
+                .set_objective(job, read_agent_text(text_file, "verifier objective")?)
+                .map_err(to_report)?;
+            collecting(job)
+        }
+        AgentCommand::VerifierAddBefore { job, text_file } => Ok(verifier_add_text(
+            &service,
+            job,
+            VerifierTextField::Before,
+            text_file,
+            "verifier before behavior",
+        )?),
+        AgentCommand::VerifierAddAfter { job, text_file } => Ok(verifier_add_text(
+            &service,
+            job,
+            VerifierTextField::After,
+            text_file,
+            "verifier after behavior",
+        )?),
+        AgentCommand::VerifierAddSideEffect { job, text_file } => Ok(verifier_add_text(
+            &service,
+            job,
+            VerifierTextField::SideEffect,
+            text_file,
+            "verifier side effect",
+        )?),
+        AgentCommand::VerifierAddAssumption { job, text_file } => Ok(verifier_add_text(
+            &service,
+            job,
+            VerifierTextField::Assumption,
+            text_file,
+            "verifier assumption",
+        )?),
+        AgentCommand::VerifierAddUncertainty { job, text_file } => Ok(verifier_add_text(
+            &service,
+            job,
+            VerifierTextField::Uncertainty,
+            text_file,
+            "verifier uncertainty",
+        )?),
+        AgentCommand::VerifierAddScope {
+            job,
+            file,
+            symbol_file,
+        } => {
+            let symbol = symbol_file
+                .as_ref()
+                .map(|path| read_agent_text(path, "verifier scope symbol"))
+                .transpose()?;
+            service
+                .add_scope(job, file.clone(), symbol)
+                .map_err(to_report)?;
+            collecting(job)
+        }
+        AgentCommand::VerifierSetConfidence { job, confidence } => {
+            service
+                .set_confidence(job, *confidence)
+                .map_err(to_report)?;
+            collecting(job)
+        }
+        AgentCommand::VerifierSubmit { job } => {
+            service.submit(job).map_err(to_report)?;
+            Ok(Some(json!({"job_id": job, "status": "submitted"})))
+        }
+        _ => Ok(None),
+    }
+}
+
+fn verifier_add_text(
+    service: &flect_app::ExternalVerifierService,
+    job: &str,
+    field: flect_app::VerifierTextField,
+    text_file: &std::path::Path,
+    label: &str,
+) -> Result<Option<serde_json::Value>> {
+    service
+        .add_text(job, field, read_agent_text(text_file, label)?)
+        .map_err(to_report)?;
+    Ok(Some(json!({"job_id": job, "status": "collecting"})))
+}
+
+fn read_agent_text(path: &std::path::Path, label: &str) -> Result<String> {
+    fs::read_to_string(path)
+        .into_diagnostic()
+        .wrap_err_with(|| format!("could not read {label} text"))
 }
 
 fn set_config_value(config: &mut Config, key: &str, value: &str) -> Result<()> {

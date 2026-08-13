@@ -150,10 +150,81 @@ enum AgentCommand {
         #[arg(long)]
         context: Option<ContextPolicy>,
     },
-    /// Validate and accept a blind verifier submission JSON file.
-    SubmitEcho {
-        #[arg(long, value_name = "PATH")]
-        submission: PathBuf,
+    /// Begin a repository-independent typed verifier submission.
+    VerifierBegin {
+        #[arg(long)]
+        job: String,
+        #[arg(long)]
+        model: Option<String>,
+        #[arg(long, value_enum, default_value_t = ModelSelectionArg::Unknown)]
+        model_selection: ModelSelectionArg,
+    },
+    /// Set the verifier's apparent objective from a UTF-8 text file.
+    VerifierSetObjective {
+        #[arg(long)]
+        job: String,
+        #[arg(long)]
+        text_file: PathBuf,
+    },
+    /// Add one apparent pre-change behavior from a UTF-8 text file.
+    VerifierAddBefore {
+        #[arg(long)]
+        job: String,
+        #[arg(long)]
+        text_file: PathBuf,
+    },
+    /// Add one apparent post-change behavior from a UTF-8 text file.
+    VerifierAddAfter {
+        #[arg(long)]
+        job: String,
+        #[arg(long)]
+        text_file: PathBuf,
+    },
+    /// Add one allowed affected scope without repository access.
+    VerifierAddScope {
+        #[arg(long)]
+        job: String,
+        #[arg(long)]
+        file: String,
+        #[arg(long)]
+        symbol_file: Option<PathBuf>,
+    },
+    /// Add one apparent side effect from a UTF-8 text file.
+    VerifierAddSideEffect {
+        #[arg(long)]
+        job: String,
+        #[arg(long)]
+        text_file: PathBuf,
+    },
+    /// Add one verifier assumption from a UTF-8 text file.
+    VerifierAddAssumption {
+        #[arg(long)]
+        job: String,
+        #[arg(long)]
+        text_file: PathBuf,
+    },
+    /// Add one verifier uncertainty from a UTF-8 text file.
+    VerifierAddUncertainty {
+        #[arg(long)]
+        job: String,
+        #[arg(long)]
+        text_file: PathBuf,
+    },
+    /// Set finite verifier confidence in the inclusive range 0 through 1.
+    VerifierSetConfidence {
+        #[arg(long)]
+        job: String,
+        confidence: f64,
+    },
+    /// Seal a typed verifier submission in external Flect state.
+    VerifierSubmit {
+        #[arg(long)]
+        job: String,
+    },
+    /// Commit a sealed verifier job into repository Flect state; parent passes only the job ID.
+    VerifierCommit {
+        #[arg(long)]
+        job: String,
     },
     /// Prepare a separate judge job after an echo is accepted.
     PrepareReconciliation {

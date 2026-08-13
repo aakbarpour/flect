@@ -172,22 +172,86 @@ fn direct_judge_submission_is_strict_and_does_not_use_chat_text() {
     assert_success(&blind);
     let blind: serde_json::Value = serde_json::from_slice(&blind.stdout).unwrap();
     let blind_job_id = blind["job_id"].as_str().unwrap();
-    let echo = std::path::PathBuf::from(blind["submission_file"].as_str().unwrap());
-    fs::write(
-        &echo,
-        format!(
-            r#"{{"job_id":"{blind_job_id}","echoed_spec":{{"apparent_objective":"Change app behavior","behavior_before":[],"behavior_after":["New behavior"],"affected_scope":[{{"file":"app.txt","symbol":null}}],"side_effects":[],"assumptions":[],"uncertainties":[],"confidence":0.9}},"model":"gpt-5.6-terra","model_selection":"explicit"}}"#
-        ),
-    )
-    .unwrap();
+    let text = tempfile::tempdir().unwrap();
+    let objective = text.path().join("objective.txt");
+    let after = text.path().join("after.txt");
+    fs::write(&objective, "Change app behavior").unwrap();
+    fs::write(&after, "New behavior").unwrap();
+    assert_success(flect(
+        repository.path(),
+        [
+            "--json",
+            "agent",
+            "verifier-begin",
+            "--job",
+            blind_job_id,
+            "--model",
+            "gpt-5.6-terra",
+            "--model-selection",
+            "explicit",
+        ],
+    ));
     assert_success(
         Command::new(env!("CARGO_BIN_EXE_flect"))
             .current_dir(repository.path())
-            .args(["--json", "agent", "submit-echo", "--submission"])
-            .arg(&echo)
+            .args([
+                "--json",
+                "agent",
+                "verifier-set-objective",
+                "--job",
+                blind_job_id,
+                "--text-file",
+            ])
+            .arg(&objective)
             .output()
             .unwrap(),
     );
+    assert_success(
+        Command::new(env!("CARGO_BIN_EXE_flect"))
+            .current_dir(repository.path())
+            .args([
+                "--json",
+                "agent",
+                "verifier-add-after",
+                "--job",
+                blind_job_id,
+                "--text-file",
+            ])
+            .arg(&after)
+            .output()
+            .unwrap(),
+    );
+    assert_success(flect(
+        repository.path(),
+        [
+            "--json",
+            "agent",
+            "verifier-add-scope",
+            "--job",
+            blind_job_id,
+            "--file",
+            "app.txt",
+        ],
+    ));
+    assert_success(flect(
+        repository.path(),
+        [
+            "--json",
+            "agent",
+            "verifier-set-confidence",
+            "--job",
+            blind_job_id,
+            "0.9",
+        ],
+    ));
+    assert_success(flect(
+        repository.path(),
+        ["--json", "agent", "verifier-submit", "--job", blind_job_id],
+    ));
+    assert_success(flect(
+        repository.path(),
+        ["--json", "agent", "verifier-commit", "--job", blind_job_id],
+    ));
     let judge = Command::new(env!("CARGO_BIN_EXE_flect"))
         .current_dir(repository.path())
         .args([

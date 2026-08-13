@@ -17,7 +17,7 @@ use thiserror::Error;
 
 use crate::{EvidenceError, materialize_judge_verdict};
 
-const VERIFIER_INSTRUCTIONS: &str = "You are the blind Flect verifier. You have not been given the original task. Do not attempt to discover it. Inspect only the supplied sanitized patch evidence. Determine what behavior this patch appears to add, remove, or change. Write exactly one strict BlindAgentSubmission containing your EchoedSpec to the designated external submission_file. Do not invoke Flect, write to the repository, or return a protocol payload in chat. Each affected_scope entry is an object: file must exactly equal a path in the supplied manifest; symbol is optional descriptive function, class, or region detail and is not a path. Do not perform general style review. Do not invent files, lines, requirements, or motivations. Preserve uncertainty.";
+const VERIFIER_INSTRUCTIONS: &str = "You are the blind Flect verifier. You have not been given the original task. Do not attempt to discover it. Inspect only the supplied sanitized patch evidence. Determine what behavior this patch appears to add, remove, or change. Invoke Flect's typed verifier lifecycle yourself: `flect agent verifier-begin --job <job>`, `verifier-set-objective --text-file <path>`, zero or more `verifier-add-before --text-file <path>`, `verifier-add-after --text-file <path>`, `verifier-add-scope --file <allowed-path> [--symbol-file <path>]`, `verifier-add-side-effect --text-file <path>`, `verifier-add-assumption --text-file <path>`, and `verifier-add-uncertainty --text-file <path>`, then `verifier-set-confidence --job <job> <0..1>` and `verifier-submit --job <job>`. Do not write JSON, invoke repository-scoped commands, write to the repository, or return a protocol payload in chat. Flect owns job binding, structure, validation, and serialization. Each affected_scope file must exactly equal a path in the supplied manifest; symbol is optional descriptive function, class, or region detail. Do not perform general style review. Do not invent files, lines, requirements, or motivations. Preserve uncertainty.";
 const JUDGE_INSTRUCTIONS: &str = "You are the Flect reconciliation judge. Do not write JSON and do not use chat text as the protocol payload. Invoke the typed Flect lifecycle yourself: `flect agent judge-begin --job <job>`, `judge-set-alignment --job <job> <SAME|PARTIAL|DIFFERENT|UNCERTAIN>`, zero or more `judge-add-finding --job <job> --kind <kind> --text-file <path> [--evidence-ref <hunk/id>]`, `judge-set-confidence --job <job> <0..1>`, then `judge-submit --job <job>`. Flect owns the job binding, envelope, serialization, evidence materialization, and persistence. Use only evidence_ref IDs in evidence_ref_contract. Compare IntendedSpec with EchoedSpec for complete alignment, not merely whether a requested change is present: surface scope creep, unrelated behavior, added functionality, and task-boundary violations. When a supported unrequested change or violated constraint has a separately described, distinct downstream behavioral consequence, emit both the base finding and a potential_side_effect; do not emit a potential_side_effect that merely restates the same divergence. SAME must have zero findings; PARTIAL and DIFFERENT must have at least one finding.";
 static JOB_SEQUENCE: AtomicU64 = AtomicU64::new(0);
 
@@ -155,14 +155,12 @@ impl AgentService {
         let bundle = self.build_bundle(&config, &run.base_revision)?;
         let job_id = generate_id("blind", &run.id)?;
         let workspace = self.create_blind_workspace(&job_id, &bundle)?;
-        let submission_file = self.create_verifier_submission_file(&job_id)?;
         let job = BlindAgentJob {
             version: 1,
             job_id: job_id.clone(),
             run_id: run.id,
             isolation: IsolationLevel::Structural,
             workspace: workspace.display().to_string(),
-            submission_file: submission_file.display().to_string(),
             instructions: VERIFIER_INSTRUCTIONS.to_owned(),
             bundle,
             echoed_spec_schema: strict_schema::<EchoedSpec>()?,
@@ -190,6 +188,7 @@ impl AgentService {
             model: None,
             model_selection: flect_core::AgentModelSelection::Unknown,
         })?;
+        ExternalVerifierService::new(&self.workspace_root)?.create(&job)?;
         Ok(job)
     }
 
@@ -241,40 +240,25 @@ impl AgentService {
         Ok(submission.echoed_spec)
     }
 
-    /// Reads the one Flect-designated external verifier submission and accepts it once.
-    ///
-    /// The caller supplies only a path; Flect owns deserialization, strict-schema validation,
-    /// job binding, scope validation, and lifecycle persistence.
+    /// Commits a completed external typed verifier draft into repository Flect state.
     ///
     /// # Errors
     ///
-    /// Returns an error for a non-designated path, malformed or invalid submission, or an
-    /// invalid job lifecycle.
-    pub fn submit_echo_file(
-        &self,
-        submission_file: &Path,
-    ) -> Result<EchoedSpec, AgentWorkflowError> {
-        let path = canonical_existing(submission_file)?;
-        let job_id = path
-            .file_stem()
-            .and_then(|name| name.to_str())
-            .and_then(|name| name.strip_suffix(".submission"))
-            .ok_or_else(|| {
-                AgentWorkflowError::InvalidState("invalid verifier submission filename".to_owned())
-            })?;
+    /// Returns an error when the job is not bound to this repository or its verifier lifecycle
+    /// has not completed successfully.
+    pub fn verifier_commit(&self, job_id: &str) -> Result<EchoedSpec, AgentWorkflowError> {
+        let external = ExternalVerifierService::new(&self.workspace_root)?;
+        let draft = external.completed(job_id)?;
         let state = self.load_blind_state(job_id)?;
-        let designated = canonical_existing(Path::new(&state.job.submission_file))?;
-        if path != designated {
-            return Err(AgentWorkflowError::SubmissionFileMismatch(
-                job_id.to_owned(),
-            ));
+        if state.job.run_id != draft.run_id || state.status != BlindStatus::Prepared {
+            return Err(AgentWorkflowError::InvalidJobState(job_id.to_owned()));
         }
-        let bytes = fs::read(&path).map_err(|source| workspace_error(&path, source))?;
-        let submission = parse_strict_blind_submission(&bytes)?;
-        if submission.job_id != job_id {
-            return Err(AgentWorkflowError::JobMismatch(job_id.to_owned()));
-        }
-        self.submit_echo(submission)
+        self.submit_echo(BlindAgentSubmission {
+            job_id: job_id.to_owned(),
+            echoed_spec: draft.echoed_spec,
+            model: draft.model,
+            model_selection: draft.model_selection,
+        })
     }
 
     /// Creates a distinct judge job from an accepted blind response.
@@ -580,20 +564,6 @@ impl AgentService {
         Ok(workspace)
     }
 
-    fn create_verifier_submission_file(&self, job_id: &str) -> Result<PathBuf, AgentWorkflowError> {
-        validate_job_id(job_id)?;
-        fs::create_dir_all(&self.workspace_root)
-            .map_err(|source| workspace_error(&self.workspace_root, source))?;
-        let workspace_root = canonical_existing(&self.workspace_root)?;
-        let repository_root = canonical_existing(self.repository.root())?;
-        if workspace_root.starts_with(&repository_root) {
-            return Err(AgentWorkflowError::UnsafeWorkspace);
-        }
-        let path = workspace_root.join(format!("{job_id}.submission.json"));
-        fs::write(&path, []).map_err(|source| workspace_error(&path, source))?;
-        Ok(path)
-    }
-
     fn blind_state_path(&self, job_id: &str) -> Result<PathBuf, AgentWorkflowError> {
         validate_job_id(job_id)?;
         Ok(self
@@ -733,6 +703,265 @@ struct BlindState {
     model_selection: flect_core::AgentModelSelection,
 }
 
+/// Repository-independent typed verifier commands for a prepared blind job.
+pub struct ExternalVerifierService {
+    workspace_root: PathBuf,
+}
+
+#[allow(clippy::missing_errors_doc)]
+impl ExternalVerifierService {
+    /// Opens Flect's external agent-workspace root without repository discovery.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the workspace root cannot be safely resolved.
+    pub fn discover() -> Result<Self, AgentWorkflowError> {
+        Self::new(&std::env::temp_dir().join("flect-agent-jobs"))
+    }
+
+    /// Opens an explicit external verifier workspace root for embedding and tests.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the workspace root cannot be safely resolved.
+    pub fn new_for_tests(workspace_root: &Path) -> Result<Self, AgentWorkflowError> {
+        Self::new(workspace_root)
+    }
+
+    fn new(workspace_root: &Path) -> Result<Self, AgentWorkflowError> {
+        let workspace_root = resolve_with_missing(workspace_root)?;
+        Ok(Self { workspace_root })
+    }
+
+    fn create(&self, job: &BlindAgentJob) -> Result<(), AgentWorkflowError> {
+        let state = ExternalVerifierState {
+            version: 1,
+            status: VerifierStatus::Prepared,
+            job_id: job.job_id.clone(),
+            run_id: job.run_id.clone(),
+            allowed_paths: job
+                .bundle
+                .patch
+                .files
+                .iter()
+                .map(|file| file.path.clone())
+                .chain(job.bundle.context.iter().map(|file| file.path.clone()))
+                .collect(),
+            draft: None,
+        };
+        self.save(&state)
+    }
+
+    /// Begins Flect-owned verifier collection.
+    pub fn begin(
+        &self,
+        job_id: &str,
+        model: Option<String>,
+        model_selection: AgentModelSelection,
+    ) -> Result<(), AgentWorkflowError> {
+        let mut state = self.load(job_id)?;
+        if state.status != VerifierStatus::Prepared {
+            return Err(AgentWorkflowError::InvalidJobState(job_id.to_owned()));
+        }
+        state.status = VerifierStatus::Collecting;
+        state.draft = Some(VerifierDraft {
+            objective: None,
+            before: Vec::new(),
+            after: Vec::new(),
+            scope: Vec::new(),
+            side_effects: Vec::new(),
+            assumptions: Vec::new(),
+            uncertainties: Vec::new(),
+            confidence: None,
+            model,
+            model_selection,
+        });
+        self.save(&state)
+    }
+
+    /// Sets the apparent objective from a verifier-owned semantic value.
+    pub fn set_objective(&self, job_id: &str, text: String) -> Result<(), AgentWorkflowError> {
+        self.update(job_id, |_state, draft| {
+            draft.objective = Some(text);
+            Ok(())
+        })
+    }
+
+    /// Adds one typed text-list semantic value.
+    pub fn add_text(
+        &self,
+        job_id: &str,
+        field: VerifierTextField,
+        text: String,
+    ) -> Result<(), AgentWorkflowError> {
+        self.update(job_id, |_state, draft| {
+            match field {
+                VerifierTextField::Before => draft.before.push(text),
+                VerifierTextField::After => draft.after.push(text),
+                VerifierTextField::SideEffect => draft.side_effects.push(text),
+                VerifierTextField::Assumption => draft.assumptions.push(text),
+                VerifierTextField::Uncertainty => draft.uncertainties.push(text),
+            }
+            Ok(())
+        })
+    }
+
+    /// Adds an allowed affected scope at the typed boundary.
+    pub fn add_scope(
+        &self,
+        job_id: &str,
+        file: String,
+        symbol: Option<String>,
+    ) -> Result<(), AgentWorkflowError> {
+        self.update(job_id, |state, draft| {
+            if !state.allowed_paths.contains(&file) {
+                return Err(AgentWorkflowError::UnavailableScope(file));
+            }
+            draft.scope.push(flect_core::AffectedScope { file, symbol });
+            Ok(())
+        })
+    }
+
+    /// Sets verifier confidence after finite range validation.
+    pub fn set_confidence(&self, job_id: &str, confidence: f64) -> Result<(), AgentWorkflowError> {
+        if !confidence.is_finite() || !(0.0..=1.0).contains(&confidence) {
+            return Err(AgentWorkflowError::InvalidState(
+                "verifier confidence must be finite and between zero and one".to_owned(),
+            ));
+        }
+        self.update(job_id, |_state, draft| {
+            draft.confidence = Some(confidence);
+            Ok(())
+        })
+    }
+
+    /// Validates and seals one typed verifier draft without repository access.
+    pub fn submit(&self, job_id: &str) -> Result<(), AgentWorkflowError> {
+        let mut state = self.load(job_id)?;
+        if state.status != VerifierStatus::Collecting {
+            return Err(AgentWorkflowError::InvalidJobState(job_id.to_owned()));
+        }
+        let draft = state
+            .draft
+            .as_ref()
+            .ok_or_else(|| AgentWorkflowError::InvalidJobState(job_id.to_owned()))?;
+        if draft.objective.is_none() || draft.confidence.is_none() {
+            return Err(AgentWorkflowError::InvalidState(
+                "verifier objective and confidence must be set".to_owned(),
+            ));
+        }
+        state.status = VerifierStatus::Submitted;
+        self.save(&state)
+    }
+
+    fn completed(&self, job_id: &str) -> Result<CompletedVerifierDraft, AgentWorkflowError> {
+        let state = self.load(job_id)?;
+        if state.status != VerifierStatus::Submitted {
+            return Err(AgentWorkflowError::InvalidJobState(job_id.to_owned()));
+        }
+        let draft = state
+            .draft
+            .ok_or_else(|| AgentWorkflowError::InvalidJobState(job_id.to_owned()))?;
+        Ok(CompletedVerifierDraft {
+            run_id: state.run_id,
+            echoed_spec: EchoedSpec {
+                apparent_objective: draft.objective.unwrap_or_default(),
+                behavior_before: draft.before,
+                behavior_after: draft.after,
+                affected_scope: draft.scope,
+                side_effects: draft.side_effects,
+                assumptions: draft.assumptions,
+                uncertainties: draft.uncertainties,
+                confidence: draft.confidence.unwrap_or_default(),
+            },
+            model: draft.model,
+            model_selection: draft.model_selection,
+        })
+    }
+
+    fn update(
+        &self,
+        job_id: &str,
+        update: impl FnOnce(
+            &mut ExternalVerifierState,
+            &mut VerifierDraft,
+        ) -> Result<(), AgentWorkflowError>,
+    ) -> Result<(), AgentWorkflowError> {
+        let mut state = self.load(job_id)?;
+        if state.status != VerifierStatus::Collecting {
+            return Err(AgentWorkflowError::InvalidJobState(job_id.to_owned()));
+        }
+        let mut draft = state
+            .draft
+            .take()
+            .ok_or_else(|| AgentWorkflowError::InvalidJobState(job_id.to_owned()))?;
+        update(&mut state, &mut draft)?;
+        state.draft = Some(draft);
+        self.save(&state)
+    }
+
+    fn state_path(&self, job_id: &str) -> Result<PathBuf, AgentWorkflowError> {
+        validate_job_id(job_id)?;
+        Ok(self.workspace_root.join(format!("{job_id}.verifier.json")))
+    }
+
+    fn load(&self, job_id: &str) -> Result<ExternalVerifierState, AgentWorkflowError> {
+        read_state(&self.state_path(job_id)?, job_id)
+    }
+
+    fn save(&self, state: &ExternalVerifierState) -> Result<(), AgentWorkflowError> {
+        write_state(&self.state_path(&state.job_id)?, state)
+    }
+}
+
+#[derive(Clone, Copy)]
+pub enum VerifierTextField {
+    Before,
+    After,
+    SideEffect,
+    Assumption,
+    Uncertainty,
+}
+
+#[derive(Serialize, Deserialize)]
+struct ExternalVerifierState {
+    version: u32,
+    status: VerifierStatus,
+    job_id: String,
+    run_id: String,
+    allowed_paths: Vec<String>,
+    draft: Option<VerifierDraft>,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+enum VerifierStatus {
+    Prepared,
+    Collecting,
+    Submitted,
+}
+
+#[derive(Serialize, Deserialize)]
+struct VerifierDraft {
+    objective: Option<String>,
+    before: Vec<String>,
+    after: Vec<String>,
+    scope: Vec<flect_core::AffectedScope>,
+    side_effects: Vec<String>,
+    assumptions: Vec<String>,
+    uncertainties: Vec<String>,
+    confidence: Option<f64>,
+    model: Option<String>,
+    model_selection: AgentModelSelection,
+}
+
+struct CompletedVerifierDraft {
+    run_id: String,
+    echoed_spec: EchoedSpec,
+    model: Option<String>,
+    model_selection: AgentModelSelection,
+}
+
 #[derive(Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 enum BlindStatus {
@@ -779,29 +1008,6 @@ fn strict_schema<T: JsonSchema>() -> Result<Value, AgentWorkflowError> {
         .map_err(|error| AgentWorkflowError::InvalidState(error.to_string()))?;
     make_objects_strict(&mut schema);
     Ok(schema)
-}
-
-fn parse_strict_blind_submission(bytes: &[u8]) -> Result<BlindAgentSubmission, AgentWorkflowError> {
-    let value: Value = serde_json::from_slice(bytes).map_err(|error| {
-        AgentWorkflowError::InvalidState(format!("invalid blind submission: {error}"))
-    })?;
-    let schema = strict_schema::<BlindAgentSubmission>()?;
-    let validator = jsonschema::validator_for(&schema)
-        .map_err(|error| AgentWorkflowError::InvalidState(error.to_string()))?;
-    let errors = validator
-        .iter_errors(&value)
-        .take(5)
-        .map(|error| error.to_string())
-        .collect::<Vec<_>>();
-    if !errors.is_empty() {
-        return Err(AgentWorkflowError::InvalidState(format!(
-            "invalid blind submission: {}",
-            errors.join("; ")
-        )));
-    }
-    serde_json::from_value(value).map_err(|error| {
-        AgentWorkflowError::InvalidState(format!("invalid blind submission: {error}"))
-    })
 }
 
 fn make_objects_strict(value: &mut Value) {
