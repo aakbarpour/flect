@@ -51,6 +51,20 @@ function Get-PinnedFlect {
     }
 }
 
+function Stage-PinnedFlect {
+    param($Source, [string]$RuntimeRoot)
+
+    $staged = Join-Path $RuntimeRoot 'flect.exe'
+    [System.IO.Directory]::CreateDirectory($RuntimeRoot) | Out-Null
+    Copy-Item -LiteralPath $Source.path -Destination $staged -Force
+    $sourceHash = (Get-FileHash -LiteralPath $Source.path -Algorithm SHA256).Hash
+    $stagedHash = (Get-FileHash -LiteralPath $staged -Algorithm SHA256).Hash
+    if ($stagedHash -ne $sourceHash) {
+        throw "Staged Flect hash mismatch: expected $sourceHash, got $stagedHash"
+    }
+    Get-PinnedFlect $staged
+}
+
 function Assert-PinnedFlect {
     param($Pinned)
 
@@ -174,7 +188,7 @@ function Assert-CleanBlindBundle {
 }
 
 function Write-AgentDispatchInstructions {
-    param([string]$Path, $Pinned, [string]$JobId, [string]$AgentTempRoot, $Grammar)
+    param([string]$Path, $Pinned, [string]$JobId, [string]$AgentTempRoot, [string]$CasePath, $Grammar)
 
     $manifest = [pscustomobject]@{
         protocol = 'typed-native-flect'
@@ -182,6 +196,7 @@ function Write-AgentDispatchInstructions {
         flect_sha256 = $Pinned.sha256
         flect_version = $Pinned.version
         agent_temp_root = $AgentTempRoot
+        case_path = $CasePath
         blind_job_id = $JobId
         verifier = $Grammar | Where-Object { $_.name -like 'verifier-*' }
         judge = $Grammar | Where-Object { $_.name -like 'judge-*' }
@@ -207,8 +222,7 @@ function New-CandidatePatch {
     return (($lines -join "`n") + "`n")
 }
 
-$pinned = Get-PinnedFlect $FlectBinary
-$grammar = Get-TypedCommandGrammar $pinned
+$sourcePinned = Get-PinnedFlect $FlectBinary
 $suite = Get-Content -LiteralPath $SuitePath -Raw | ConvertFrom-Json
 $cases = @($suite.cases | Where-Object { $_.subset -eq 'canonical-5' })
 if ($cases.Count -ne 5) {
@@ -222,6 +236,8 @@ if (Test-Path -LiteralPath $ControllerRoot) {
     Remove-Item -LiteralPath $ControllerRoot -Recurse -Force
 }
 New-Item -ItemType Directory -Path $CaseRoot, $ControllerRoot | Out-Null
+$pinned = Stage-PinnedFlect $sourcePinned (Join-Path $ControllerRoot 'runtime')
+$grammar = Get-TypedCommandGrammar $pinned
 
 $summary = @()
 foreach ($case in $cases) {
@@ -291,7 +307,7 @@ foreach ($case in $cases) {
     if ($blindJob.workspace -notlike "$agentStateRoot*") {
         throw "Blind job workspace is not in this case's fresh agent-state root: $($blindJob.workspace)"
     }
-    Write-AgentDispatchInstructions (Join-Path $controlPath 'dispatch-manifest.json') $pinned $blindJob.job_id $agentTempRoot $grammar
+    Write-AgentDispatchInstructions (Join-Path $controlPath 'dispatch-manifest.json') $pinned $blindJob.job_id $agentTempRoot $casePath $grammar
     Write-Utf8File (Join-Path $controlPath 'run-manifest.json') ([pscustomobject]@{
         run_id = $RunId
         case_id = $case.id
