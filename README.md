@@ -27,8 +27,8 @@ Direct API mode:
 
 ```console
 flect init
-flect config set runner.model gpt-5.6-luna
-flect config set runner.fallback_model gpt-5.6-terra
+# Defaults: gpt-5.6-luna primary, with one gpt-5.6-terra fallback.
+# Override either model only when your project needs a different route.
 flect config set runner.kind api
 flect start --task "Fix token expiry without changing legacy auth"
 # code and normal tests
@@ -135,6 +135,7 @@ kind = "api"
 protocol = "responses"
 base_url = "https://api.openai.com/v1"
 api_key_env = "OPENAI_API_KEY"
+# Defaults shown explicitly; either value remains configurable.
 model = "gpt-5.6-luna"
 fallback_model = "gpt-5.6-terra"
 reasoning_effort = "medium"

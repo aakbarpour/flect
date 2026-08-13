@@ -77,8 +77,8 @@ fn doctor_reports_api_credential_readiness_without_exposing_values() {
     let config = fs::read_to_string(&config_path)
         .unwrap()
         .replace(
-            "kind = \"mock\"",
-            "kind = \"api\"\nmodel = \"custom-model\"",
+            "kind = \"mock\"\nprotocol = \"responses\"\nbase_url = \"https://api.openai.com/v1\"\napi_key_env = \"OPENAI_API_KEY\"\nmodel = \"gpt-5.6-luna\"",
+            "kind = \"api\"\nprotocol = \"responses\"\nbase_url = \"https://api.openai.com/v1\"\napi_key_env = \"OPENAI_API_KEY\"\nmodel = \"custom-model\"",
         )
         .replace("OPENAI_API_KEY", "FLECT_DOCTOR_TEST_KEY");
     fs::write(config_path, config).unwrap();

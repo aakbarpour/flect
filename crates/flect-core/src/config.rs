@@ -112,8 +112,8 @@ impl Default for RunnerConfig {
             protocol: RunnerProtocol::Responses,
             base_url: "https://api.openai.com/v1".to_owned(),
             api_key_env: "OPENAI_API_KEY".to_owned(),
-            model: None,
-            fallback_model: None,
+            model: Some("gpt-5.6-luna".to_owned()),
+            fallback_model: Some("gpt-5.6-terra".to_owned()),
             reasoning_effort: "medium".to_owned(),
             timeout_seconds: 120,
             escalate_on_uncertain: true,
@@ -241,6 +241,8 @@ kind = "mock"
 protocol = "responses"
 base_url = "https://api.openai.com/v1"
 api_key_env = "OPENAI_API_KEY"
+model = "gpt-5.6-luna"
+fallback_model = "gpt-5.6-terra"
 reasoning_effort = "medium"
 timeout_seconds = 120
 escalate_on_uncertain = true
@@ -359,9 +361,10 @@ mod tests {
     }
 
     #[test]
-    fn api_runner_requires_model() {
+    fn api_runner_rejects_an_explicitly_empty_model() {
         let mut config = Config::default();
         config.runner.kind = RunnerKind::Api;
+        config.runner.model = None;
         assert!(matches!(
             config.validate(),
             Err(ConfigError::Invalid {

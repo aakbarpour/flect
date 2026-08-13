@@ -171,6 +171,7 @@ fn excludes_untracked_fifo() {
     assert!(!patch.files.iter().any(|file| file.path == "untracked.fifo"));
 }
 
+#[cfg(unix)]
 fn capture_untracked(repository: &tempfile::TempDir) -> Result<flect_core::PatchSet, GitError> {
     let git_repository = GitRepository::discover(repository.path()).unwrap();
     git_repository.capture_patch(

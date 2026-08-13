@@ -8,8 +8,8 @@ Initialize a Git repository and configure the Responses-compatible runner withou
 
 ```console
 flect init
-flect config set runner.model gpt-5.6-luna
-flect config set runner.fallback_model gpt-5.6-terra
+# Defaults: gpt-5.6-luna primary, with one gpt-5.6-terra fallback.
+# Override either model only when your project needs a different route.
 flect config set runner.kind api
 flect config show
 ```
@@ -23,7 +23,7 @@ flect verify --dry-run
 flect verify
 ```
 
-`gpt-5.6-luna` and `gpt-5.6-terra` are configurable starting candidates, not claims of optimality. Flect tries the primary once and can fall back once for malformed output, low confidence, uncertainty, or configured complexity signals. Use `runner.fallback_model none` to clear the fallback. See [model routing](model-routing.md).
+`gpt-5.6-luna` is the default primary and `gpt-5.6-terra` is the default bounded fallback; both remain configurable. Flect tries the primary once and can fall back once for malformed output, low confidence, uncertainty, or configured complexity signals. Use `runner.fallback_model none` to clear the fallback. See [model routing](model-routing.md).
 
 ## Codex Skill mode
 
