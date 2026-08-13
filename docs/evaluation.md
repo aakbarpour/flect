@@ -34,6 +34,10 @@ The blind verifier receives only the candidate patch, focused base context, mani
 
 The HTTP profile workflow is model-backed but is **not Codex-native**. A result may be called “Codex-native” only when the execution environment actually provides fresh Codex verifier and judge agents through the trusted `prepare-blind` / `submit-echo` / `prepare-reconciliation` / typed judge lifecycle and the retained run artifact establishes that fact. Do not relabel an HTTP run or substitute it when that runtime capability is unavailable.
 
+### Retained Codex-native engineering run
+
+The repository retains a scoped first-20 run from the frozen 40-case suite in [`benchmarks/codex-native-corrected-20.md`](../benchmarks/codex-native-corrected-20.md), with machine-readable provenance in [`benchmarks/codex-native-corrected-20.json`](../benchmarks/codex-native-corrected-20.json). It attempted 20 cases and persisted 19: exact verdict accuracy was 13/20 (65.00%) over all attempts and 13/19 (68.42%) over completed cases; good-patch acceptance was 3/4 (75.00%); completed bad-patch detection was 15/15 (100.00%); category exact match was 11/19 (57.89%); contamination, retries, repair, and normalization were all zero. One judge submission failed closed for an invalid side-effect disposition and is preserved as a raw unpersisted result. These figures are a transparent engineering snapshot, not a 40-case release claim, a population estimate, or a replacement for independently reviewed held-out evaluation.
+
 ## Metrics and failures
 
 JSON and terminal reports use `cases_completed` only for cases that produced a trusted, materialized verdict; this does not claim that a production `VerificationRecord` was persisted. `overall_verdict_accuracy` is exact trusted verdict matches divided by all attempted cases, so every orchestration, provider, schema, or evidence failure reduces it. `completed_verdict_accuracy` is the same numerator divided only by completed cases and must not be read as overall benchmark success.
