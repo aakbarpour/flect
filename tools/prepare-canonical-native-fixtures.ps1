@@ -66,6 +66,40 @@ function Assert-PinnedFlect {
     }
 }
 
+function Get-TypedCommandGrammar {
+    param($Pinned)
+
+    $specs = @(
+        @{ name = 'verifier-begin'; syntax = "<flect> --json agent verifier-begin --job <blind-job-id> --model <model> --model-selection <explicit|inherited|unknown>"; required = @('--job', '--model', '--model-selection') },
+        @{ name = 'verifier-set-objective'; syntax = "<flect> --json agent verifier-set-objective --job <blind-job-id> --text-file <utf8-text-path>"; required = @('--job', '--text-file') },
+        @{ name = 'verifier-add-before'; syntax = "<flect> --json agent verifier-add-before --job <blind-job-id> --text-file <utf8-text-path>"; required = @('--job', '--text-file') },
+        @{ name = 'verifier-add-after'; syntax = "<flect> --json agent verifier-add-after --job <blind-job-id> --text-file <utf8-text-path>"; required = @('--job', '--text-file') },
+        @{ name = 'verifier-add-scope'; syntax = "<flect> --json agent verifier-add-scope --job <blind-job-id> --file <allowed-bundle-path> [--symbol-file <utf8-text-path>]"; required = @('--job', '--file') },
+        @{ name = 'verifier-add-side-effect'; syntax = "<flect> --json agent verifier-add-side-effect --job <blind-job-id> --text-file <utf8-text-path>"; required = @('--job', '--text-file') },
+        @{ name = 'verifier-add-assumption'; syntax = "<flect> --json agent verifier-add-assumption --job <blind-job-id> --text-file <utf8-text-path>"; required = @('--job', '--text-file') },
+        @{ name = 'verifier-add-uncertainty'; syntax = "<flect> --json agent verifier-add-uncertainty --job <blind-job-id> --text-file <utf8-text-path>"; required = @('--job', '--text-file') },
+        @{ name = 'verifier-set-confidence'; syntax = "<flect> --json agent verifier-set-confidence --job <blind-job-id> <finite-confidence-0..1>"; required = @('--job', '<CONFIDENCE>') },
+        @{ name = 'verifier-submit'; syntax = "<flect> --json agent verifier-submit --job <blind-job-id>"; required = @('--job') },
+        @{ name = 'judge-begin'; syntax = "<flect> --json agent judge-begin --job <judge-job-id> --model <model> --model-selection <explicit|inherited|unknown>"; required = @('--job', '--model', '--model-selection') },
+        @{ name = 'judge-set-alignment'; syntax = "<flect> --json agent judge-set-alignment --job <judge-job-id> <SAME|PARTIAL|DIFFERENT|UNCERTAIN>"; required = @('--job', '<ALIGNMENT>') },
+        @{ name = 'judge-add-finding'; syntax = "<flect> --json agent judge-add-finding --job <judge-job-id> --kind <finding-kind> --text-file <utf8-text-path> [--evidence-ref <hunk-id>]"; required = @('--job', '--kind', '--text-file') },
+        @{ name = 'judge-add-side-effect-finding'; syntax = "<flect> --json agent judge-add-side-effect-finding --job <judge-job-id> --candidate <side_effect/n> --text-file <utf8-text-path> --evidence-ref <hunk-id>"; required = @('--job', '--candidate', '--text-file', '--evidence-ref') },
+        @{ name = 'judge-mark-side-effect-not-distinct'; syntax = "<flect> --json agent judge-mark-side-effect-not-distinct --job <judge-job-id> --candidate <side_effect/n> --reason-file <utf8-text-path>"; required = @('--job', '--candidate', '--reason-file') },
+        @{ name = 'judge-set-confidence'; syntax = "<flect> --json agent judge-set-confidence --job <judge-job-id> <finite-confidence-0..1>"; required = @('--job', '<CONFIDENCE>') },
+        @{ name = 'judge-submit'; syntax = "<flect> --json agent judge-submit --job <judge-job-id>"; required = @('--job') }
+    )
+    foreach ($spec in $specs) {
+        $help = (& $Pinned.path agent $spec.name --help) -join "`n"
+        if ($LASTEXITCODE -ne 0) { throw "Could not read pinned CLI grammar for $($spec.name)" }
+        if ($help -notmatch '(?m)^\s+Usage:') { throw "Missing usage grammar for $($spec.name)" }
+        foreach ($token in $spec.required) {
+            if ($help -notmatch [regex]::Escape($token)) { throw "Pinned CLI help for $($spec.name) lacks required token $token" }
+        }
+        $spec.help = $help
+    }
+    return $specs
+}
+
 function Write-Utf8File {
     param([string]$Path, [string]$Content)
 
@@ -140,26 +174,21 @@ function Assert-CleanBlindBundle {
 }
 
 function Write-AgentDispatchInstructions {
-    param([string]$Path, $Pinned, [string]$JobId, [string]$AgentTempRoot)
+    param([string]$Path, $Pinned, [string]$JobId, [string]$AgentTempRoot, $Grammar)
 
-    Write-Utf8File $Path @"
-Pinned Flect executable: $($Pinned.path)
-Pinned SHA-256: $($Pinned.sha256)
-External agent TEMP/TMP root: $AgentTempRoot
-Blind job: $JobId
-
-Before every Flect command, set both TEMP and TMP to the external agent root above and verify the executable hash equals the pinned SHA-256. Invoke only this absolute executable, never bare flect. Every verifier command must include the agent subcommand, for example:
-
-& '$($Pinned.path)' --json agent verifier-begin --job '$JobId' --model gpt-5.6-terra --model-selection explicit
-
-Continue only with the typed verifier lifecycle using that same prefix, then submit. Do not run prepare-blind: this is the sole prepared blind job for this case.
-
-For the separate judge, keep the same pinned executable and SHA-256, but run the repository-scoped typed judge lifecycle from the case repository. The parent will provide the Flect-generated judge job ID and contract. Use:
-
-& '$($Pinned.path)' --json agent judge-begin --job '<judge-job-id>' --model gpt-5.6-terra --model-selection explicit
-
-Never invoke bare flect, omit the agent subcommand, or prepare another blind job.
-"@
+    $manifest = [pscustomobject]@{
+        protocol = 'typed-native-flect'
+        flect_path = $Pinned.path
+        flect_sha256 = $Pinned.sha256
+        flect_version = $Pinned.version
+        agent_temp_root = $AgentTempRoot
+        blind_job_id = $JobId
+        verifier = $Grammar | Where-Object { $_.name -like 'verifier-*' }
+        judge = $Grammar | Where-Object { $_.name -like 'judge-*' }
+        text_files = @('Create a UTF-8 text file outside the repository; pass its absolute path to the command''s --text-file or --reason-file option. The file is read by Flect; do not write JSON or protocol payloads.')
+        rules = @('Use only flect_path; never bare flect.', 'Include the literal agent subcommand.', 'Use blind_job_id for every verifier command.', 'Use the Flect-provided judge job ID for every judge command.', 'Do not run prepare-blind.', 'Use one lifecycle attempt with no retries, repair, normalization, or semantic parent handling.')
+    }
+    Write-Utf8File $Path ($manifest | ConvertTo-Json -Depth 20)
 }
 
 function New-CandidatePatch {
@@ -179,6 +208,7 @@ function New-CandidatePatch {
 }
 
 $pinned = Get-PinnedFlect $FlectBinary
+$grammar = Get-TypedCommandGrammar $pinned
 $suite = Get-Content -LiteralPath $SuitePath -Raw | ConvertFrom-Json
 $cases = @($suite.cases | Where-Object { $_.subset -eq 'canonical-5' })
 if ($cases.Count -ne 5) {
@@ -261,7 +291,7 @@ foreach ($case in $cases) {
     if ($blindJob.workspace -notlike "$agentStateRoot*") {
         throw "Blind job workspace is not in this case's fresh agent-state root: $($blindJob.workspace)"
     }
-    Write-AgentDispatchInstructions (Join-Path $controlPath 'verifier-dispatch.md') $pinned $blindJob.job_id $agentTempRoot
+    Write-AgentDispatchInstructions (Join-Path $controlPath 'dispatch-manifest.json') $pinned $blindJob.job_id $agentTempRoot $grammar
     Write-Utf8File (Join-Path $controlPath 'run-manifest.json') ([pscustomobject]@{
         run_id = $RunId
         case_id = $case.id
