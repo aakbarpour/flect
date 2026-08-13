@@ -121,6 +121,18 @@ fn accepts_structured_scope_and_exposes_judge_evidence_contract() {
     let judge = service.prepare_reconciliation(&blind.job_id).unwrap();
     assert_eq!(judge.evidence_contract["version"], 2);
     assert!(
+        judge.evidence_contract["finding_kind_guidance"]["unrequested_change"]
+            .as_str()
+            .unwrap()
+            .contains("even when the requested behavior is also present")
+    );
+    assert!(
+        judge.evidence_contract["finding_kind_guidance"]["potential_side_effect"]
+            .as_str()
+            .unwrap()
+            .contains("alongside")
+    );
+    assert!(
         judge.evidence_contract["rules"]
             .as_array()
             .unwrap()

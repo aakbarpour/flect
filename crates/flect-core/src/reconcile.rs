@@ -184,17 +184,29 @@ fn reconstructed_text(echoed: &EchoedSpec) -> String {
 
 fn constraint_is_violated(constraint: &str, echoed: &EchoedSpec) -> bool {
     let normalized = constraint.to_ascii_lowercase();
-    if !(normalized.contains("must not")
+    let forbids_change = normalized.contains("must not")
         || normalized.contains("do not")
-        || normalized.contains("without"))
-    {
+        || normalized.contains("without");
+    let preserves_state = normalized.contains("leave ")
+        || normalized.contains("keep ")
+        || normalized.contains("preserve ");
+    if !forbids_change && !preserves_state {
         return false;
     }
+    let constraint_terms = terms(constraint);
     echoed
         .behavior_after
         .iter()
         .chain(echoed.side_effects.iter())
-        .any(|behavior| coverage(constraint, behavior) >= 0.5)
+        .any(|behavior| {
+            let behavior_terms = terms(behavior);
+            if forbids_change && coverage(constraint, behavior) >= 0.5 {
+                return true;
+            }
+            preserves_state
+                && !constraint_terms.is_disjoint(&behavior_terms)
+                && !constraint_terms.is_subset(&behavior_terms)
+        })
 }
 
 fn coverage(expected: &str, actual: &str) -> f64 {
@@ -327,5 +339,24 @@ mod tests {
                 .iter()
                 .any(|finding| finding.contains("billing"))
         );
+    }
+
+    #[test]
+    fn preserving_a_value_is_violated_when_the_same_setting_changes() {
+        let mut intended = intended();
+        intended.constraints = vec!["Leave token lifetime at 30".to_owned()];
+        let echoed = EchoedSpec {
+            apparent_objective: "Reject expired refresh tokens and rotate valid tokens".to_owned(),
+            behavior_after: vec![
+                "Expired refresh tokens are rejected".to_owned(),
+                "Tokens rotate after refresh".to_owned(),
+                "Token lifetime is 60".to_owned(),
+            ],
+            confidence: 0.9,
+            ..EchoedSpec::default()
+        };
+        let verdict = reconcile(&intended, &echoed);
+        assert_eq!(verdict.alignment, Alignment::Partial);
+        assert_eq!(verdict.violated_constraints, intended.constraints);
     }
 }
