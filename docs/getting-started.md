@@ -48,7 +48,7 @@ Register `flect mcp` using the current Codex stdio configuration in [the MCP gui
 3. `flect_prepare_blind`, then spawn a fresh no-parent-context verifier with only that job's allowed resources.
 4. `flect_submit_echo` with the verifier's typed response.
 5. `flect_prepare_reconciliation`, then spawn a different fresh judge with only that contract.
-6. Have the judge itself invoke the typed lifecycle: `flect agent judge-begin --job <job>`, `judge-set-alignment`, zero or more `judge-add-finding --text-file <path>`, `judge-set-confidence`, and `judge-submit --job <job>`. The parent only observes completion; it never translates semantic output. Flect constructs the submission envelope, validates evidence references, serializes domain values, and persists the result.
+6. The fresh children do not execute Flect or write JSON. They write only the generated external verifier/judge draft primitives and create `submitted` last; the trusted parent passes only the job ID to the commit operation. Flect validates evidence references, constructs domain values, and persists the result.
 7. `flect_get_result` if the result is needed later.
 
 For automated API mode, use `flect_inspect` followed by `flect_verify`. Both modes use the same domain types, evidence policy, and local `.flect/` store.

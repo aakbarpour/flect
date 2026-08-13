@@ -157,13 +157,17 @@ impl AgentService {
         let bundle = self.build_bundle(&config, &run.base_revision)?;
         let job_id = generate_id("blind", &run.id)?;
         let workspace = self.create_blind_workspace(&job_id, &bundle)?;
+        let draft_root = external_draft_root(&self.workspace_root, &job_id);
         let job = BlindAgentJob {
             version: 1,
             job_id: job_id.clone(),
             run_id: run.id,
             isolation: IsolationLevel::Structural,
             workspace: workspace.display().to_string(),
-            instructions: VERIFIER_INSTRUCTIONS.to_owned(),
+            instructions: format!(
+                "You are a blind verifier. Do not execute Flect or any repository command. Write only primitive UTF-8 values under the generated draft root `{}`: objective, confidence, numbered behavior_before/behavior_after/side_effects/assumptions/uncertainties `.txt` files, and numbered affected_scope directories containing `file` and optional `symbol`. Create empty marker `submitted` last. Unknown files, JSON, and chat protocol are forbidden; the trusted parent commits by job ID.",
+                draft_root.display()
+            ),
             bundle,
             echoed_spec_schema: strict_schema::<EchoedSpec>()?,
             allowed_resources: vec![
@@ -250,7 +254,14 @@ impl AgentService {
     /// has not completed successfully.
     pub fn verifier_commit(&self, job_id: &str) -> Result<EchoedSpec, AgentWorkflowError> {
         let external = ExternalVerifierService::new(&self.workspace_root)?;
-        let draft = external.completed(job_id)?;
+        let draft = if external_draft_root(&self.workspace_root, job_id)
+            .join("submitted")
+            .is_file()
+        {
+            external.completed_filesystem(job_id)?
+        } else {
+            external.completed(job_id)?
+        };
         let state = self.load_blind_state(job_id)?;
         if state.job.run_id != draft.run_id || state.status != BlindStatus::Prepared {
             return Err(AgentWorkflowError::InvalidJobState(job_id.to_owned()));
@@ -288,12 +299,16 @@ impl AgentService {
             .map_err(|error| AgentWorkflowError::RunState(error.to_string()))?;
         let job_id = generate_id("judge", &blind.job.run_id)?;
         let evidence_ref_contract = evidence_ref_contract(&blind.job.bundle, &echoed_spec);
+        let draft_root = external_draft_root(&self.workspace_root, &job_id);
         let job = ReconciliationAgentJob {
             version: 1,
-            job_id,
+            job_id: job_id.clone(),
             run_id: blind.job.run_id.clone(),
             blind_job_id: blind.job.job_id.clone(),
-            instructions: JUDGE_INSTRUCTIONS.to_owned(),
+            instructions: format!(
+                "{JUDGE_INSTRUCTIONS} Do not execute Flect or repository commands. Write only primitive values under generated draft root `{}`: exactly one alignment marker directory (SAME, PARTIAL, DIFFERENT, or UNCERTAIN), confidence, numbered findings with one finding-kind marker plus text and optional evidence_ref, and side_effect_dispositions/side_effect/<n> with exactly one finding or not-distinct branch. Create empty marker `submitted` last. The trusted parent commits by job ID.",
+                draft_root.display()
+            ),
             intended_spec: run.intended_spec,
             echoed_spec,
             evidence_ref_contract,
@@ -307,6 +322,7 @@ impl AgentService {
             blind_model_selection: blind.model_selection,
             draft: None,
         })?;
+        create_judge_draft(&external_draft_root(&self.workspace_root, &job_id))?;
         Ok(job)
     }
 
@@ -465,13 +481,36 @@ impl AgentService {
     /// Returns an error for incomplete state, invalid semantics, invalid evidence, or persistence failure.
     pub fn judge_submit(&self, job_id: &str) -> Result<VerificationRecord, AgentWorkflowError> {
         let mut state = self.load_reconciliation_state(job_id)?;
-        if state.status != ReconciliationStatus::Collecting || state.job.job_id != job_id {
+        if state.job.job_id != job_id {
             return Err(AgentWorkflowError::InvalidJobState(job_id.to_owned()));
         }
-        let draft = state
-            .draft
-            .clone()
-            .ok_or_else(|| AgentWorkflowError::InvalidJobState(job_id.to_owned()))?;
+        let filesystem_submitted =
+            is_regular_file(&external_draft_root(&self.workspace_root, job_id).join("submitted"));
+        if state.status == ReconciliationStatus::Prepared && filesystem_submitted {
+            state.status = ReconciliationStatus::Collecting;
+            state.draft = Some(JudgeDraft {
+                alignment: None,
+                confidence: None,
+                findings: Vec::new(),
+                side_effect_dispositions: Vec::new(),
+                model: None,
+                model_selection: AgentModelSelection::Unknown,
+            });
+        }
+        if state.status != ReconciliationStatus::Collecting {
+            return Err(AgentWorkflowError::InvalidJobState(job_id.to_owned()));
+        }
+        let draft = if filesystem_submitted {
+            read_judge_filesystem(
+                &external_draft_root(&self.workspace_root, job_id),
+                &state.job.echoed_spec,
+            )?
+        } else {
+            state
+                .draft
+                .clone()
+                .ok_or_else(|| AgentWorkflowError::InvalidJobState(job_id.to_owned()))?
+        };
         validate_side_effect_dispositions(&draft, &state.job.echoed_spec)?;
         let verdict = JudgeVerdict {
             alignment: draft.alignment.ok_or_else(|| {
@@ -828,6 +867,19 @@ impl ExternalVerifierService {
     }
 
     fn create(&self, job: &BlindAgentJob) -> Result<(), AgentWorkflowError> {
+        let draft = external_draft_root(&self.workspace_root, &job.job_id);
+        fs::create_dir_all(draft.join("behavior_before"))
+            .map_err(|source| workspace_error(&draft, source))?;
+        fs::create_dir_all(draft.join("behavior_after"))
+            .map_err(|source| workspace_error(&draft, source))?;
+        fs::create_dir_all(draft.join("affected_scope"))
+            .map_err(|source| workspace_error(&draft, source))?;
+        fs::create_dir_all(draft.join("side_effects"))
+            .map_err(|source| workspace_error(&draft, source))?;
+        fs::create_dir_all(draft.join("assumptions"))
+            .map_err(|source| workspace_error(&draft, source))?;
+        fs::create_dir_all(draft.join("uncertainties"))
+            .map_err(|source| workspace_error(&draft, source))?;
         let state = ExternalVerifierState {
             version: 1,
             status: VerifierStatus::Prepared,
@@ -973,6 +1025,53 @@ impl ExternalVerifierService {
         })
     }
 
+    fn completed_filesystem(
+        &self,
+        job_id: &str,
+    ) -> Result<CompletedVerifierDraft, AgentWorkflowError> {
+        let state = self.load(job_id)?;
+        if state.status != VerifierStatus::Prepared {
+            return Err(AgentWorkflowError::InvalidJobState(job_id.to_owned()));
+        }
+        let root = external_draft_root(&self.workspace_root, job_id);
+        require_marker(&root.join("submitted"))?;
+        let objective = read_required_text(&root.join("objective"))?;
+        let confidence = read_confidence(&root.join("confidence"))?;
+        let before = read_numbered_texts(&root.join("behavior_before"))?;
+        let after = read_numbered_texts(&root.join("behavior_after"))?;
+        let side_effects = read_numbered_texts(&root.join("side_effects"))?;
+        let assumptions = read_numbered_texts(&root.join("assumptions"))?;
+        let uncertainties = read_numbered_texts(&root.join("uncertainties"))?;
+        let scope = read_scopes(&root.join("affected_scope"), &state.allowed_paths)?;
+        let allowed = [
+            "objective",
+            "confidence",
+            "submitted",
+            "behavior_before",
+            "behavior_after",
+            "affected_scope",
+            "side_effects",
+            "assumptions",
+            "uncertainties",
+        ];
+        reject_unexpected_entries(&root, &allowed)?;
+        Ok(CompletedVerifierDraft {
+            run_id: state.run_id,
+            echoed_spec: EchoedSpec {
+                apparent_objective: objective,
+                behavior_before: before,
+                behavior_after: after,
+                affected_scope: scope,
+                side_effects,
+                assumptions,
+                uncertainties,
+                confidence,
+            },
+            model: None,
+            model_selection: AgentModelSelection::Unknown,
+        })
+    }
+
     fn update(
         &self,
         job_id: &str,
@@ -1054,6 +1153,358 @@ struct CompletedVerifierDraft {
     echoed_spec: EchoedSpec,
     model: Option<String>,
     model_selection: AgentModelSelection,
+}
+
+fn external_draft_root(workspace_root: &Path, job_id: &str) -> PathBuf {
+    workspace_root.join(job_id).join("draft")
+}
+
+fn read_required_text(path: &Path) -> Result<String, AgentWorkflowError> {
+    if !is_regular_file(path) {
+        return Err(AgentWorkflowError::InvalidState(format!(
+            "missing draft file {}",
+            path.display()
+        )));
+    }
+    let text = fs::read_to_string(path).map_err(|source| workspace_error(path, source))?;
+    if text.trim().is_empty() {
+        return Err(AgentWorkflowError::InvalidState(format!(
+            "empty draft file {}",
+            path.display()
+        )));
+    }
+    Ok(text)
+}
+
+fn is_regular_file(path: &Path) -> bool {
+    fs::symlink_metadata(path).is_ok_and(|metadata| metadata.file_type().is_file())
+}
+
+fn is_real_dir(path: &Path) -> bool {
+    fs::symlink_metadata(path).is_ok_and(|metadata| metadata.file_type().is_dir())
+}
+
+fn require_marker(path: &Path) -> Result<(), AgentWorkflowError> {
+    if !is_regular_file(path) {
+        return Err(AgentWorkflowError::InvalidState(format!(
+            "missing marker {}",
+            path.display()
+        )));
+    }
+    let contents = fs::read(path).map_err(|source| workspace_error(path, source))?;
+    if !contents.is_empty() {
+        return Err(AgentWorkflowError::InvalidState(format!(
+            "marker must be empty {}",
+            path.display()
+        )));
+    }
+    Ok(())
+}
+
+fn read_confidence(path: &Path) -> Result<f64, AgentWorkflowError> {
+    let text = read_required_text(path)?;
+    let value = text
+        .trim()
+        .parse::<f64>()
+        .map_err(|_| AgentWorkflowError::InvalidState("invalid confidence".to_owned()))?;
+    if !value.is_finite() || !(0.0..=1.0).contains(&value) {
+        return Err(AgentWorkflowError::InvalidState(
+            "invalid confidence".to_owned(),
+        ));
+    }
+    Ok(value)
+}
+
+fn read_numbered_texts(dir: &Path) -> Result<Vec<String>, AgentWorkflowError> {
+    if !is_real_dir(dir) {
+        return Err(AgentWorkflowError::InvalidState(format!(
+            "missing draft directory {}",
+            dir.display()
+        )));
+    }
+    let mut entries = fs::read_dir(dir)
+        .map_err(|source| workspace_error(dir, source))?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|source| workspace_error(dir, source))?;
+    entries.sort_by_key(std::fs::DirEntry::file_name);
+    let mut values = Vec::new();
+    for (index, entry) in entries.into_iter().enumerate() {
+        let name = entry.file_name().to_string_lossy().to_string();
+        if name != format!("{index:06}.txt") {
+            return Err(AgentWorkflowError::InvalidState(
+                "invalid or gapped draft entry".to_owned(),
+            ));
+        }
+        values.push(read_required_text(&entry.path())?);
+    }
+    Ok(values)
+}
+
+fn read_scopes(
+    dir: &Path,
+    allowed: &[String],
+) -> Result<Vec<flect_core::AffectedScope>, AgentWorkflowError> {
+    if !is_real_dir(dir) {
+        return Err(AgentWorkflowError::InvalidState(format!(
+            "missing draft directory {}",
+            dir.display()
+        )));
+    }
+    let mut entries = fs::read_dir(dir)
+        .map_err(|source| workspace_error(dir, source))?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|source| workspace_error(dir, source))?;
+    entries.sort_by_key(std::fs::DirEntry::file_name);
+    let mut scopes = Vec::new();
+    for (index, entry) in entries.into_iter().enumerate() {
+        if entry.file_name().to_string_lossy() != format!("{index:06}")
+            || !is_real_dir(&entry.path())
+        {
+            return Err(AgentWorkflowError::InvalidState(
+                "invalid scope entry".to_owned(),
+            ));
+        }
+        let scope = entry.path();
+        let file = read_required_text(&scope.join("file"))?;
+        if !allowed.contains(&file) {
+            return Err(AgentWorkflowError::UnavailableScope(file));
+        }
+        let symbol_path = scope.join("symbol");
+        let symbol = if symbol_path.exists() {
+            Some(read_required_text(&symbol_path)?)
+        } else {
+            None
+        };
+        reject_unexpected_entries(&scope, &["file", "symbol"])?;
+        scopes.push(flect_core::AffectedScope { file, symbol });
+    }
+    Ok(scopes)
+}
+
+fn reject_unexpected_entries(dir: &Path, allowed: &[&str]) -> Result<(), AgentWorkflowError> {
+    for entry in fs::read_dir(dir).map_err(|source| workspace_error(dir, source))? {
+        let entry = entry.map_err(|source| workspace_error(dir, source))?;
+        if !allowed.contains(&entry.file_name().to_string_lossy().as_ref()) {
+            return Err(AgentWorkflowError::InvalidState(format!(
+                "unexpected draft entry {}",
+                entry.path().display()
+            )));
+        }
+    }
+    Ok(())
+}
+
+fn create_judge_draft(root: &Path) -> Result<(), AgentWorkflowError> {
+    for dir in ["alignment", "findings", "side_effect_dispositions"] {
+        fs::create_dir_all(root.join(dir)).map_err(|source| workspace_error(root, source))?;
+    }
+    Ok(())
+}
+
+#[allow(clippy::too_many_lines)]
+fn read_judge_filesystem(
+    root: &Path,
+    echoed: &EchoedSpec,
+) -> Result<JudgeDraft, AgentWorkflowError> {
+    let submitted = root.join("submitted");
+    require_marker(&submitted)?;
+    reject_unexpected_entries(
+        root,
+        &[
+            "alignment",
+            "confidence",
+            "findings",
+            "side_effect_dispositions",
+            "submitted",
+        ],
+    )?;
+    let align_dir = root.join("alignment");
+    if !is_real_dir(&align_dir) {
+        return Err(AgentWorkflowError::InvalidState(
+            "missing alignment directory".to_owned(),
+        ));
+    }
+    let markers = fs::read_dir(&align_dir)
+        .map_err(|source| workspace_error(&align_dir, source))?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|source| workspace_error(&align_dir, source))?;
+    if markers.len() != 1 {
+        return Err(AgentWorkflowError::InvalidState(
+            "judge alignment must have one marker".to_owned(),
+        ));
+    }
+    if !is_real_dir(&markers[0].path()) {
+        return Err(AgentWorkflowError::InvalidState(
+            "alignment marker must be a directory".to_owned(),
+        ));
+    }
+    let alignment = match markers[0].file_name().to_string_lossy().as_ref() {
+        "SAME" => Alignment::Same,
+        "PARTIAL" => Alignment::Partial,
+        "DIFFERENT" => Alignment::Different,
+        "UNCERTAIN" => Alignment::Uncertain,
+        _ => {
+            return Err(AgentWorkflowError::InvalidState(
+                "invalid judge alignment".to_owned(),
+            ));
+        }
+    };
+    reject_unexpected_entries(&align_dir, &["SAME", "PARTIAL", "DIFFERENT", "UNCERTAIN"])?;
+    let confidence = read_confidence(&root.join("confidence"))?;
+    let findings_dir = root.join("findings");
+    let mut findings = Vec::new();
+    let mut entries = fs::read_dir(&findings_dir)
+        .map_err(|source| workspace_error(&findings_dir, source))?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|source| workspace_error(&findings_dir, source))?;
+    entries.sort_by_key(std::fs::DirEntry::file_name);
+    for (index, entry) in entries.into_iter().enumerate() {
+        if entry.file_name().to_string_lossy() != format!("{index:06}")
+            || !is_real_dir(&entry.path())
+        {
+            return Err(AgentWorkflowError::InvalidState(
+                "invalid finding entry".to_owned(),
+            ));
+        }
+        let dir = entry.path();
+        let kind_dir = fs::read_dir(&dir)
+            .map_err(|source| workspace_error(&dir, source))?
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|source| workspace_error(&dir, source))?;
+        if kind_dir.len() != 1 || !is_real_dir(&kind_dir[0].path()) {
+            return Err(AgentWorkflowError::InvalidState(
+                "finding must have one kind marker".to_owned(),
+            ));
+        }
+        let kind = match kind_dir[0].file_name().to_string_lossy().as_ref() {
+            "missing_requirement" => FindingCategory::MissingRequirements,
+            "unrequested_change" => FindingCategory::UnrequestedChanges,
+            "violated_constraint" => FindingCategory::ViolatedConstraints,
+            "potential_side_effect" => FindingCategory::PotentialSideEffects,
+            _ => {
+                return Err(AgentWorkflowError::InvalidState(
+                    "invalid finding kind".to_owned(),
+                ));
+            }
+        };
+        let text = read_required_text(&dir.join("text"))?;
+        let evidence_path = dir.join("evidence_ref");
+        let evidence_ref = if evidence_path.exists() {
+            Some(read_required_text(&evidence_path)?)
+        } else {
+            None
+        };
+        reject_unexpected_entries(
+            &dir,
+            &[
+                "missing_requirement",
+                "unrequested_change",
+                "violated_constraint",
+                "potential_side_effect",
+                "text",
+                "evidence_ref",
+            ],
+        )?;
+        findings.push(JudgeFinding {
+            kind,
+            text,
+            evidence_ref,
+        });
+    }
+    let mut side_effect_dispositions = Vec::new();
+    for index in 0..echoed.side_effects.len() {
+        let candidate = root
+            .join("side_effect_dispositions")
+            .join(format!("side_effect/{index}"));
+        if !is_real_dir(&candidate) {
+            return Err(AgentWorkflowError::InvalidState(format!(
+                "missing disposition side_effect/{index}"
+            )));
+        }
+        let branches = fs::read_dir(&candidate)
+            .map_err(|source| workspace_error(&candidate, source))?
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|source| workspace_error(&candidate, source))?;
+        if branches.len() != 1 || !is_real_dir(&branches[0].path()) {
+            return Err(AgentWorkflowError::InvalidState(
+                "invalid side effect disposition".to_owned(),
+            ));
+        }
+        let branch = branches[0].file_name().to_string_lossy().to_string();
+        if branch == "finding" {
+            let text = read_required_text(&candidate.join("finding/text"))?;
+            let evidence = read_required_text(&candidate.join("finding/evidence_ref"))?;
+            reject_unexpected_entries(&candidate.join("finding"), &["text", "evidence_ref"])?;
+            let finding_index = findings.len();
+            findings.push(JudgeFinding {
+                kind: FindingCategory::PotentialSideEffects,
+                text,
+                evidence_ref: Some(evidence),
+            });
+            side_effect_dispositions.push(SideEffectDisposition {
+                candidate: format!("side_effect/{index}"),
+                side_effect_index: index,
+                kind: SideEffectDispositionKind::Finding { finding_index },
+            });
+        } else if branch == "not-distinct" {
+            let reason = read_required_text(&candidate.join("not-distinct/reason"))?;
+            reject_unexpected_entries(&candidate.join("not-distinct"), &["reason"])?;
+            side_effect_dispositions.push(SideEffectDisposition {
+                candidate: format!("side_effect/{index}"),
+                side_effect_index: index,
+                kind: SideEffectDispositionKind::NotDistinct { reason },
+            });
+        } else {
+            return Err(AgentWorkflowError::InvalidState(
+                "invalid side effect disposition branch".to_owned(),
+            ));
+        }
+    }
+    let disposition_root = root.join("side_effect_dispositions");
+    if !is_real_dir(&disposition_root) {
+        return Err(AgentWorkflowError::InvalidState(
+            "missing side effect disposition directory".to_owned(),
+        ));
+    }
+    let side_effect_root = disposition_root.join("side_effect");
+    if echoed.side_effects.is_empty() {
+        if side_effect_root.exists() {
+            return Err(AgentWorkflowError::InvalidState(
+                "unexpected side effect disposition entries".to_owned(),
+            ));
+        }
+        return Ok(JudgeDraft {
+            alignment: Some(alignment),
+            confidence: Some(confidence),
+            findings,
+            side_effect_dispositions,
+            model: None,
+            model_selection: AgentModelSelection::Unknown,
+        });
+    }
+    if !is_real_dir(&side_effect_root) {
+        return Err(AgentWorkflowError::InvalidState(
+            "missing side effect disposition entries".to_owned(),
+        ));
+    }
+    let disposition_entries = fs::read_dir(&side_effect_root)
+        .map_err(|source| workspace_error(&side_effect_root, source))?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|source| workspace_error(&side_effect_root, source))?;
+    if disposition_entries.len() != echoed.side_effects.len() {
+        return Err(AgentWorkflowError::InvalidState(
+            "unexpected side effect disposition".to_owned(),
+        ));
+    }
+    reject_unexpected_entries(&disposition_root, &["side_effect"])?;
+    Ok(JudgeDraft {
+        alignment: Some(alignment),
+        confidence: Some(confidence),
+        findings,
+        side_effect_dispositions,
+        model: None,
+        model_selection: AgentModelSelection::Unknown,
+    })
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

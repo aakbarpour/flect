@@ -101,6 +101,57 @@ fn complete_agent_handoff_is_blind_validated_and_persisted() {
 }
 
 #[test]
+fn filesystem_draft_protocol_validates_and_persists_verifier_and_judge() {
+    let repository = fixture_repository();
+    let workspace = tempfile::tempdir().unwrap();
+    let jobs = workspace.path().join("jobs");
+    let service = AgentService::with_workspace_root(
+        GitRepository::discover(repository.path()).unwrap(),
+        jobs.clone(),
+    )
+    .unwrap();
+
+    let blind = service.prepare_blind(None, None).unwrap();
+    let draft = jobs.join(&blind.job_id).join("draft");
+    fs::write(draft.join("objective"), "Reject disabled accounts").unwrap();
+    fs::write(draft.join("confidence"), "0.9").unwrap();
+    fs::write(draft.join("submitted"), []).unwrap();
+    fs::create_dir_all(draft.join("affected_scope/000000")).unwrap();
+    fs::write(draft.join("affected_scope/000000/file"), "app.txt").unwrap();
+    let echoed = service.verifier_commit(&blind.job_id).unwrap();
+    assert_eq!(echoed.apparent_objective, "Reject disabled accounts");
+    assert!(service.verifier_commit(&blind.job_id).is_err());
+
+    let judge = service.prepare_reconciliation(&blind.job_id).unwrap();
+    let judge_draft = jobs.join(&judge.job_id).join("draft");
+    fs::create_dir_all(judge_draft.join("alignment/SAME")).unwrap();
+    fs::write(judge_draft.join("confidence"), "0.8").unwrap();
+    fs::write(judge_draft.join("submitted"), []).unwrap();
+    let record = service.judge_submit(&judge.job_id).unwrap();
+    assert_eq!(record.verdict.alignment, Alignment::Same);
+    assert!(service.judge_submit(&judge.job_id).is_err());
+}
+
+#[test]
+fn filesystem_draft_protocol_rejects_unknown_entries_and_invalid_values() {
+    let repository = fixture_repository();
+    let workspace = tempfile::tempdir().unwrap();
+    let jobs = workspace.path().join("jobs");
+    let service = AgentService::with_workspace_root(
+        GitRepository::discover(repository.path()).unwrap(),
+        jobs.clone(),
+    )
+    .unwrap();
+    let blind = service.prepare_blind(None, None).unwrap();
+    let draft = jobs.join(&blind.job_id).join("draft");
+    fs::write(draft.join("objective"), "objective").unwrap();
+    fs::write(draft.join("confidence"), "2.0").unwrap();
+    fs::write(draft.join("submitted"), []).unwrap();
+    fs::write(draft.join("unexpected"), "reject").unwrap();
+    assert!(service.verifier_commit(&blind.job_id).is_err());
+}
+
+#[test]
 fn accepts_structured_scope_and_exposes_judge_evidence_contract() {
     let repository = fixture_repository();
     let workspace = tempfile::tempdir().unwrap();

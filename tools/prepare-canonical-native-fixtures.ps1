@@ -198,10 +198,11 @@ function Write-AgentDispatchInstructions {
         agent_temp_root = $AgentTempRoot
         case_path = $CasePath
         blind_job_id = $JobId
-        verifier = $Grammar | Where-Object { $_.name -like 'verifier-*' }
-        judge = $Grammar | Where-Object { $_.name -like 'judge-*' }
-        text_files = @('Create a UTF-8 text file outside the repository; pass its absolute path to the command''s --text-file or --reason-file option. The file is read by Flect; do not write JSON or protocol payloads.')
-        rules = @('Use only flect_path; never bare flect.', 'Include the literal agent subcommand.', 'Use blind_job_id for every verifier command.', 'Use the Flect-provided judge job ID for every judge command.', 'Do not run prepare-blind.', 'Use one lifecycle attempt with no retries, repair, normalization, or semantic parent handling.')
+        verifier_draft_root = (Join-Path $AgentTempRoot ("flect-agent-jobs\$JobId\draft"))
+        judge_draft_root_pattern = (Join-Path $AgentTempRoot 'flect-agent-jobs\<judge-job-id>\draft')
+        verifier_protocol = @('objective', 'confidence', 'behavior_before/<000000>.txt', 'behavior_after/<000000>.txt', 'affected_scope/<000000>/file', 'affected_scope/<000000>/symbol', 'side_effects/<000000>.txt', 'assumptions/<000000>.txt', 'uncertainties/<000000>.txt', 'submitted')
+        judge_protocol = @('alignment/<SAME|PARTIAL|DIFFERENT|UNCERTAIN>', 'confidence', 'findings/<000000>/<kind>', 'findings/<000000>/text', 'findings/<000000>/evidence_ref', 'side_effect_dispositions/side_effect/<n>/{finding|not-distinct}', 'submitted')
+        rules = @('Do not execute Flect or any repository command.', 'Write only primitive UTF-8 draft files in the generated draft roots.', 'Create submitted last.', 'Do not write JSON, use chat protocol, retry, repair, normalize, or infer semantics.')
     }
     Write-Utf8File $Path ($manifest | ConvertTo-Json -Depth 20)
 }
