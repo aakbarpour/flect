@@ -68,8 +68,16 @@ fn complete_agent_handoff_is_blind_validated_and_persisted() {
     assert_ne!(judge.job_id, blind.job_id);
     assert_eq!(judge.echoed_spec, echoed);
     assert!(Path::new(&judge.workspace).join("JUDGE.md").is_file());
-    assert!(Path::new(&judge.workspace).join("intended-spec.json").is_file());
-    assert!(Path::new(&judge.workspace).join("echoed-spec.json").is_file());
+    assert!(
+        Path::new(&judge.workspace)
+            .join("intended-spec.json")
+            .is_file()
+    );
+    assert!(
+        Path::new(&judge.workspace)
+            .join("echoed-spec.json")
+            .is_file()
+    );
     assert!(
         Path::new(&judge.workspace)
             .join("evidence-ref-contract.json")
