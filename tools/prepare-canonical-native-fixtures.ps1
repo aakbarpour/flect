@@ -200,9 +200,9 @@ function Write-AgentDispatchInstructions {
         blind_job_id = $JobId
         verifier_draft_root = (Join-Path $AgentTempRoot ("flect-agent-jobs\$JobId\draft"))
         judge_draft_root_pattern = (Join-Path $AgentTempRoot 'flect-agent-jobs\<judge-job-id>\draft')
-        verifier_protocol = @('objective', 'confidence', 'behavior_before/<000000>.txt', 'behavior_after/<000000>.txt', 'affected_scope/<000000>/file', 'affected_scope/<000000>/symbol', 'side_effects/<000000>.txt', 'assumptions/<000000>.txt', 'uncertainties/<000000>.txt', 'submitted')
-        judge_protocol = @('alignment/<SAME|PARTIAL|DIFFERENT|UNCERTAIN>', 'confidence', 'findings/<000000>/<kind>', 'findings/<000000>/text', 'findings/<000000>/evidence_ref', 'side_effect_dispositions/side_effect/<n>/{finding|not-distinct}', 'submitted')
-        rules = @('Do not execute Flect or any repository command.', 'Write only primitive UTF-8 draft files in the generated draft roots.', 'Create submitted last.', 'Do not write JSON, use chat protocol, retry, repair, normalize, or infer semantics.')
+        verifier_protocol = @('objective', 'confidence', 'model', 'model_selection', 'behavior_before/000000.txt', 'behavior_after/000000.txt', 'affected_scope/000000/file', 'affected_scope/000000/symbol', 'side_effects/000000.txt', 'assumptions/000000.txt', 'uncertainties/000000.txt', 'submitted')
+        judge_protocol = @('alignment/<SAME|PARTIAL|DIFFERENT|UNCERTAIN>', 'confidence', 'model', 'model_selection', 'findings/000000/<kind>', 'findings/000000/text', 'findings/000000/evidence_ref', 'side_effect_dispositions/side_effect/<n>/{finding|not-distinct}', 'submitted')
+        rules = @('Do not execute Flect or any repository command.', 'Write only primitive UTF-8 draft files in the generated draft roots.', 'Write non-marker values with no BOM and no trailing CR/LF using an exact-byte API.', 'Scalar names are extensionless; numbered entries are zero-based, consecutive, and six digits.', 'Write actual runtime model and explicit|inherited|unknown selection.', 'Create submitted last as exactly zero bytes and verify its length.', 'Do not write JSON, use chat protocol, retry, repair, normalize, or infer semantics.')
     }
     Write-Utf8File $Path ($manifest | ConvertTo-Json -Depth 20)
 }

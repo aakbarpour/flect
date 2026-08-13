@@ -17,8 +17,8 @@ use thiserror::Error;
 
 use crate::{EvidenceError, materialize_judge_verdict};
 
-const VERIFIER_INSTRUCTIONS: &str = "You are the blind Flect verifier. You have not been given the original task. Do not attempt to discover it. Inspect only the supplied sanitized patch evidence. Determine what behavior this patch appears to add, remove, or change. Invoke Flect's typed verifier lifecycle yourself: `flect agent verifier-begin --job <job>`, `verifier-set-objective --text-file <path>`, zero or more `verifier-add-before --text-file <path>`, `verifier-add-after --text-file <path>`, `verifier-add-scope --file <allowed-path> [--symbol-file <path>]`, `verifier-add-side-effect --text-file <path>`, `verifier-add-assumption --text-file <path>`, and `verifier-add-uncertainty --text-file <path>`, then `verifier-set-confidence --job <job> <0..1>` and `verifier-submit --job <job>`. Do not write JSON, invoke repository-scoped commands, write to the repository, or return a protocol payload in chat. Flect owns job binding, structure, validation, and serialization. Each affected_scope file must exactly equal a path in the supplied manifest; symbol is optional descriptive function, class, or region detail. Do not perform general style review. Do not invent files, lines, requirements, or motivations. Preserve uncertainty.";
-const JUDGE_INSTRUCTIONS: &str = "You are the Flect reconciliation judge. Do not write JSON and do not use chat text as the protocol payload. Invoke the typed Flect lifecycle yourself: `flect agent judge-begin --job <job>`, `judge-set-alignment --job <job> <SAME|PARTIAL|DIFFERENT|UNCERTAIN>`, zero or more `judge-add-finding --job <job> --kind <kind> --text-file <path> [--evidence-ref <hunk/id>]`, then disposition every listed `side_effect/<n>` with either `judge-add-side-effect-finding --candidate <id> --text-file <path> --evidence-ref <hunk/id>` or `judge-mark-side-effect-not-distinct --candidate <id> --reason-file <path>`, `judge-set-confidence --job <job> <0..1>`, and `judge-submit --job <job>`. Flect owns the job binding, envelope, serialization, evidence materialization, and persistence. Use only evidence_ref IDs in evidence_ref_contract. Compare IntendedSpec with EchoedSpec for complete alignment, not merely whether a requested change is present: surface scope creep, unrelated behavior, added functionality, and task-boundary violations. A constraint violation or downstream side effect alone does not establish DIFFERENT: use PARTIAL when the requested objective is materially advanced with divergence. DIFFERENT requires a missing requirement or unrequested change that supports unrelated, replacing, or contradictory work. Each verifier-reported side effect must be explicitly dispositioned; do not emit a potential_side_effect that merely restates the same divergence. SAME must have zero findings; PARTIAL and DIFFERENT must have at least one finding.";
+const VERIFIER_INSTRUCTIONS: &str = "You are the blind Flect verifier. You have not been given the original task. Do not attempt to discover it. Inspect only the supplied sanitized patch evidence and determine what behavior the patch appears to add, remove, or change. Do not execute Flect or any repository command, write JSON, write to the repository, or use chat as the protocol payload. Write only the permitted primitive UTF-8 files in the assigned Flect draft root. Write every non-marker value with no UTF-8 BOM and no trailing carriage return or newline; use an exact-byte file API rather than a line-oriented writer. Scalar files are named exactly `objective`, `confidence`, `model`, and `model_selection`, with no extension. `model` records the actual runtime model and `model_selection` is exactly `explicit`, `inherited`, or `unknown`. List entries use consecutive zero-based six-digit names beginning at `000000.txt` in `behavior_before`, `behavior_after`, `side_effects`, `assumptions`, and `uncertainties`. Scope entries use consecutive zero-based six-digit directories beginning at `affected_scope/000000`, each containing extensionless `file` and optional `symbol`. Each scope file's exact bytes must equal one path in the supplied manifest. Leave a list directory empty when there are no entries; never invent placeholder content. Create `submitted` last as an exactly zero-byte file, then verify its length is zero. Do not add any other file or directory. Flect owns job binding, structure, validation, and serialization. Do not perform general style review or invent files, lines, requirements, or motivations. Preserve uncertainty.";
+const JUDGE_INSTRUCTIONS: &str = "You are the Flect reconciliation judge. Do not execute Flect or repository commands, write JSON, write to the repository, or use chat as the protocol payload. Write only the permitted primitive UTF-8 files in the assigned Flect draft root. Write every non-marker value with no UTF-8 BOM and no trailing carriage return or newline; use an exact-byte file API rather than a line-oriented writer. Scalar files are named exactly `confidence`, `model`, and `model_selection`, with no extension. `model` records the actual runtime model and `model_selection` is exactly `explicit`, `inherited`, or `unknown`. Create exactly one empty alignment marker directory: `alignment/SAME`, `alignment/PARTIAL`, `alignment/DIFFERENT`, or `alignment/UNCERTAIN`. Finding entries use consecutive zero-based six-digit directories beginning at `findings/000000`; each contains one empty kind-marker directory named `missing_requirement`, `unrequested_change`, `violated_constraint`, or `potential_side_effect`, plus extensionless `text` and optional `evidence_ref`. Use only IDs from evidence_ref_contract. For every listed `side_effect/<n>`, create exactly one disposition under `side_effect_dispositions/side_effect/<n>`: either `finding` containing extensionless `text` and `evidence_ref`, or `not-distinct` containing extensionless `reason`. A verifier side-effect candidate is distinct only when it describes a downstream consequence beyond the base divergence itself, even when both arise from the same changed hunk. Caller migration or newly exposed sensitive data are downstream consequences; specifically, logging request-derived identifiers, keys, or values is both an unrequested behavior and a potential disclosure/observability side effect. The changed API, added output, wrong-component behavior, or altered label itself is only the violated constraint or unrequested change. Mark a candidate not-distinct when its semantic claim is the base behavior itself, but not merely because it shares a cause or evidence reference with a genuine downstream consequence. Create `submitted` last as an exactly zero-byte file, then verify its length is zero. Do not add any other file or directory. Compare IntendedSpec with EchoedSpec for complete alignment: surface scope creep, unrelated behavior, added functionality, and task-boundary violations. A constraint violation or downstream side effect alone does not establish DIFFERENT; use PARTIAL when the requested objective is materially advanced with divergence. DIFFERENT requires a missing requirement or unrequested change that supports unrelated, replacing, or contradictory work. Each verifier-reported side effect must be explicitly dispositioned; do not emit a potential_side_effect that merely restates the same divergence. SAME must have zero findings; PARTIAL and DIFFERENT must have at least one finding. Flect owns job binding, serialization, evidence materialization, and persistence.";
 static JOB_SEQUENCE: AtomicU64 = AtomicU64::new(0);
 
 #[derive(Debug, Error)]
@@ -165,7 +165,7 @@ impl AgentService {
             isolation: IsolationLevel::Structural,
             workspace: workspace.display().to_string(),
             instructions: format!(
-                "You are a blind verifier. Do not execute Flect or any repository command. Write only primitive UTF-8 values under the generated draft root `{}`: objective, confidence, numbered behavior_before/behavior_after/side_effects/assumptions/uncertainties `.txt` files, and numbered affected_scope directories containing `file` and optional `symbol`. Create empty marker `submitted` last. Unknown files, JSON, and chat protocol are forbidden; the trusted parent commits by job ID.",
+                "{VERIFIER_INSTRUCTIONS} The assigned draft root is `{}`. The trusted parent commits only the bound job ID.",
                 draft_root.display()
             ),
             bundle,
@@ -306,7 +306,7 @@ impl AgentService {
             run_id: blind.job.run_id.clone(),
             blind_job_id: blind.job.job_id.clone(),
             instructions: format!(
-                "{JUDGE_INSTRUCTIONS} Do not execute Flect or repository commands. Write only primitive values under generated draft root `{}`: exactly one alignment marker directory (SAME, PARTIAL, DIFFERENT, or UNCERTAIN), confidence, numbered findings with one finding-kind marker plus text and optional evidence_ref, and side_effect_dispositions/side_effect/<n> with exactly one finding or not-distinct branch. Create empty marker `submitted` last. The trusted parent commits by job ID.",
+                "{JUDGE_INSTRUCTIONS} The assigned draft root is `{}`. The trusted parent submits only the bound job ID.",
                 draft_root.display()
             ),
             intended_spec: run.intended_spec,
@@ -817,7 +817,7 @@ fn evidence_ref_contract(bundle: &BlindBundle, echoed_spec: &EchoedSpec) -> Valu
             "SAME requires findings to be empty; PARTIAL and DIFFERENT require at least one finding.",
             "Do not return SAME merely because a requested change is present; SAME requires no supported divergence from the full IntendedSpec.",
             "DIFFERENT requires at least one missing_requirement or unrequested_change finding; violated_constraint and potential_side_effect findings alone do not establish objective mismatch.",
-            "Every side_effect candidate must be dispositioned before submit. Use a typed side-effect finding with valid evidence for a distinct consequence, or record why it is not distinct.",
+            "Every side_effect candidate must be dispositioned before submit. Use a typed side-effect finding with valid evidence only for a downstream consequence beyond the base behavior itself, such as caller migration or newly exposed sensitive data. Logging request-derived identifiers, keys, or values is both an unrequested change and a potential disclosure/observability side effect. A changed API, added output, wrong-component behavior, or altered label itself remains only the base category. A downstream consequence may share a cause or hunk with the base divergence.",
             "confidence is required and must be a number from 0 through 1."
         ],
         "finding_example": files.iter().find_map(|file| file["hunks"].as_array().and_then(|hunks| hunks.first()).map(|hunk| serde_json::json!({"kind": "violated_constraint", "text": "The changed setting violates the constraint.", "evidence_ref": hunk["hunk_id"]}))),
@@ -1037,6 +1037,8 @@ impl ExternalVerifierService {
         require_marker(&root.join("submitted"))?;
         let objective = read_required_text(&root.join("objective"))?;
         let confidence = read_confidence(&root.join("confidence"))?;
+        let model = read_required_text(&root.join("model"))?;
+        let model_selection = read_model_selection(&root.join("model_selection"))?;
         let before = read_numbered_texts(&root.join("behavior_before"))?;
         let after = read_numbered_texts(&root.join("behavior_after"))?;
         let side_effects = read_numbered_texts(&root.join("side_effects"))?;
@@ -1046,6 +1048,8 @@ impl ExternalVerifierService {
         let allowed = [
             "objective",
             "confidence",
+            "model",
+            "model_selection",
             "submitted",
             "behavior_before",
             "behavior_after",
@@ -1067,8 +1071,8 @@ impl ExternalVerifierService {
                 uncertainties,
                 confidence,
             },
-            model: None,
-            model_selection: AgentModelSelection::Unknown,
+            model: Some(model),
+            model_selection,
         })
     }
 
@@ -1215,6 +1219,17 @@ fn read_confidence(path: &Path) -> Result<f64, AgentWorkflowError> {
     Ok(value)
 }
 
+fn read_model_selection(path: &Path) -> Result<AgentModelSelection, AgentWorkflowError> {
+    match read_required_text(path)?.trim() {
+        "explicit" => Ok(AgentModelSelection::Explicit),
+        "inherited" => Ok(AgentModelSelection::Inherited),
+        "unknown" => Ok(AgentModelSelection::Unknown),
+        _ => Err(AgentWorkflowError::InvalidState(
+            "invalid model selection".to_owned(),
+        )),
+    }
+}
+
 fn read_numbered_texts(dir: &Path) -> Result<Vec<String>, AgentWorkflowError> {
     if !is_real_dir(dir) {
         return Err(AgentWorkflowError::InvalidState(format!(
@@ -1313,6 +1328,8 @@ fn read_judge_filesystem(
         &[
             "alignment",
             "confidence",
+            "model",
+            "model_selection",
             "findings",
             "side_effect_dispositions",
             "submitted",
@@ -1351,6 +1368,8 @@ fn read_judge_filesystem(
     };
     reject_unexpected_entries(&align_dir, &["SAME", "PARTIAL", "DIFFERENT", "UNCERTAIN"])?;
     let confidence = read_confidence(&root.join("confidence"))?;
+    let model = read_required_text(&root.join("model"))?;
+    let model_selection = read_model_selection(&root.join("model_selection"))?;
     let findings_dir = root.join("findings");
     let mut findings = Vec::new();
     let mut entries = fs::read_dir(&findings_dir)
@@ -1367,16 +1386,19 @@ fn read_judge_filesystem(
             ));
         }
         let dir = entry.path();
-        let kind_dir = fs::read_dir(&dir)
+        let kind_dirs = fs::read_dir(&dir)
             .map_err(|source| workspace_error(&dir, source))?
             .collect::<Result<Vec<_>, _>>()
-            .map_err(|source| workspace_error(&dir, source))?;
-        if kind_dir.len() != 1 || !is_real_dir(&kind_dir[0].path()) {
+            .map_err(|source| workspace_error(&dir, source))?
+            .into_iter()
+            .filter(|entry| is_real_dir(&entry.path()))
+            .collect::<Vec<_>>();
+        if kind_dirs.len() != 1 {
             return Err(AgentWorkflowError::InvalidState(
                 "finding must have one kind marker".to_owned(),
             ));
         }
-        let kind = match kind_dir[0].file_name().to_string_lossy().as_ref() {
+        let kind = match kind_dirs[0].file_name().to_string_lossy().as_ref() {
             "missing_requirement" => FindingCategory::MissingRequirements,
             "unrequested_change" => FindingCategory::UnrequestedChanges,
             "violated_constraint" => FindingCategory::ViolatedConstraints,
@@ -1478,8 +1500,8 @@ fn read_judge_filesystem(
             confidence: Some(confidence),
             findings,
             side_effect_dispositions,
-            model: None,
-            model_selection: AgentModelSelection::Unknown,
+            model: Some(model),
+            model_selection,
         });
     }
     if !is_real_dir(&side_effect_root) {
@@ -1502,8 +1524,8 @@ fn read_judge_filesystem(
         confidence: Some(confidence),
         findings,
         side_effect_dispositions,
-        model: None,
-        model_selection: AgentModelSelection::Unknown,
+        model: Some(model),
+        model_selection,
     })
 }
 

@@ -68,7 +68,8 @@ fn complete_agent_handoff_is_blind_validated_and_persisted() {
     assert_ne!(judge.job_id, blind.job_id);
     assert_eq!(judge.echoed_spec, echoed);
     assert!(judge.intended_spec.objective.contains(FORWARD_SENTINEL));
-    assert!(judge.instructions.contains("judge-begin"));
+    assert!(judge.instructions.contains("`findings/000000`"));
+    assert!(!judge.instructions.contains("judge-begin"));
     assert!(!judge.instructions.contains("ReconciliationAgentSubmission"));
     assert!(
         RunStore::new(repository.path())
@@ -112,23 +113,58 @@ fn filesystem_draft_protocol_validates_and_persists_verifier_and_judge() {
     .unwrap();
 
     let blind = service.prepare_blind(None, None).unwrap();
+    assert!(
+        blind
+            .instructions
+            .contains("`objective`, `confidence`, `model`")
+    );
+    assert!(blind.instructions.contains("`000000.txt`"));
+    assert!(blind.instructions.contains("exactly zero-byte file"));
+    assert!(
+        blind
+            .instructions
+            .contains("no trailing carriage return or newline")
+    );
+    assert!(!blind.instructions.contains("verifier-begin"));
     let draft = jobs.join(&blind.job_id).join("draft");
     fs::write(draft.join("objective"), "Reject disabled accounts").unwrap();
     fs::write(draft.join("confidence"), "0.9").unwrap();
-    fs::write(draft.join("submitted"), []).unwrap();
+    fs::write(draft.join("model"), "gpt-5.6-terra").unwrap();
+    fs::write(draft.join("model_selection"), "explicit").unwrap();
     fs::create_dir_all(draft.join("affected_scope/000000")).unwrap();
     fs::write(draft.join("affected_scope/000000/file"), "app.txt").unwrap();
+    fs::write(draft.join("submitted"), []).unwrap();
     let echoed = service.verifier_commit(&blind.job_id).unwrap();
     assert_eq!(echoed.apparent_objective, "Reject disabled accounts");
     assert!(service.verifier_commit(&blind.job_id).is_err());
 
     let judge = service.prepare_reconciliation(&blind.job_id).unwrap();
+    assert!(judge.instructions.contains("`findings/000000`"));
+    assert!(judge.instructions.contains("exactly zero-byte file"));
+    assert!(
+        judge
+            .instructions
+            .contains("no trailing carriage return or newline")
+    );
+    assert!(!judge.instructions.contains("judge-begin"));
     let judge_draft = jobs.join(&judge.job_id).join("draft");
     fs::create_dir_all(judge_draft.join("alignment/SAME")).unwrap();
     fs::write(judge_draft.join("confidence"), "0.8").unwrap();
+    fs::write(judge_draft.join("model"), "gpt-5.6-terra").unwrap();
+    fs::write(judge_draft.join("model_selection"), "explicit").unwrap();
     fs::write(judge_draft.join("submitted"), []).unwrap();
     let record = service.judge_submit(&judge.job_id).unwrap();
     assert_eq!(record.verdict.alignment, Alignment::Same);
+    assert_eq!(record.model_calls[0].model, "gpt-5.6-terra");
+    assert_eq!(record.model_calls[1].model, "gpt-5.6-terra");
+    assert_eq!(
+        record.model_calls[0].escalation_reason.as_deref(),
+        Some("agent model selection: Explicit")
+    );
+    assert_eq!(
+        record.model_calls[1].escalation_reason.as_deref(),
+        Some("agent model selection: Explicit")
+    );
     assert!(service.judge_submit(&judge.job_id).is_err());
 }
 
@@ -146,9 +182,60 @@ fn filesystem_draft_protocol_rejects_unknown_entries_and_invalid_values() {
     let draft = jobs.join(&blind.job_id).join("draft");
     fs::write(draft.join("objective"), "objective").unwrap();
     fs::write(draft.join("confidence"), "2.0").unwrap();
+    fs::write(draft.join("model"), "gpt-5.6-terra").unwrap();
+    fs::write(draft.join("model_selection"), "explicit").unwrap();
     fs::write(draft.join("submitted"), []).unwrap();
     fs::write(draft.join("unexpected"), "reject").unwrap();
     assert!(service.verifier_commit(&blind.job_id).is_err());
+}
+
+#[test]
+fn filesystem_judge_accepts_a_typed_finding_with_text_and_evidence() {
+    let repository = fixture_repository();
+    let workspace = tempfile::tempdir().unwrap();
+    let jobs = workspace.path().join("jobs");
+    let service = AgentService::with_workspace_root(
+        GitRepository::discover(repository.path()).unwrap(),
+        jobs.clone(),
+    )
+    .unwrap();
+    let blind = service.prepare_blind(None, None).unwrap();
+    service
+        .submit_echo(BlindAgentSubmission {
+            job_id: blind.job_id.clone(),
+            echoed_spec: EchoedSpec {
+                confidence: 0.9,
+                ..EchoedSpec::default()
+            },
+            model: Some("gpt-5.6-terra".to_owned()),
+            model_selection: AgentModelSelection::Explicit,
+        })
+        .unwrap();
+    let judge = service.prepare_reconciliation(&blind.job_id).unwrap();
+    let draft = jobs.join(&judge.job_id).join("draft");
+    fs::create_dir_all(draft.join("alignment/PARTIAL")).unwrap();
+    fs::create_dir_all(draft.join("findings/000000/missing_requirement")).unwrap();
+    fs::write(
+        draft.join("findings/000000/text"),
+        "The requested behavior is absent.",
+    )
+    .unwrap();
+    fs::write(draft.join("findings/000000/evidence_ref"), "hunk/0").unwrap();
+    fs::write(draft.join("confidence"), "0.9").unwrap();
+    fs::write(draft.join("model"), "gpt-5.6-terra").unwrap();
+    fs::write(draft.join("model_selection"), "explicit").unwrap();
+    fs::write(draft.join("submitted"), []).unwrap();
+
+    let record = service.judge_submit(&judge.job_id).unwrap();
+    assert_eq!(record.verdict.alignment, Alignment::Partial);
+    assert_eq!(
+        record.verdict.missing_requirements,
+        vec!["The requested behavior is absent."]
+    );
+    assert_eq!(
+        record.verdict.evidence[0].finding_ids,
+        vec!["missing_requirements/0"]
+    );
 }
 
 #[test]
@@ -391,12 +478,20 @@ fn side_effect_guidance_requires_a_distinct_consequence_without_duplication() {
     assert!(guidance.contains("distinct plausible externally observable impact"));
     // Verifier-reported consequences must receive a typed disposition.
     assert!(rule.contains("dispositioned"));
+    assert!(rule.contains("downstream consequence beyond the base behavior itself"));
+    assert!(rule.contains("altered label itself remains only the base category"));
+    assert!(rule.contains("Logging request-derived identifiers, keys, or values"));
     // Equivalent wording is not a separate downstream consequence.
     assert!(guidance.contains("do not treat one category as a substitute"));
     assert!(
         judge
             .instructions
             .contains("do not emit a potential_side_effect that merely restates")
+    );
+    assert!(
+        judge
+            .instructions
+            .contains("wrong-component behavior, or altered label itself")
     );
 
     let bundle = service.prepare_blind(None, None).unwrap().bundle;
