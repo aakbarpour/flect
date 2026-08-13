@@ -11,6 +11,7 @@ This report records the authorized first-20 scope of the corrected-source run. I
 - Run roots: `benchmark-40-corrected/` and `benchmark-40-corrected-controller/`
 - Run ID: `benchmark-40-corrected`
 - Models: verifier and judge both `gpt-5.6-terra`, explicit selection, `fork_turns="none"`
+- Post-run CI-only change: a test-only `clippy::too_many_lines` allowance was added after the benchmark; it does not change production or harness behavior.
 
 The first 20 cases all materialized as `git_exact`. The frozen all-40 preflight remains 37 `git_exact`, 2 `fixture_structural`, 1 `binary_surrogate`, and 0 rejected; all 20 scoped blind bundles were clean. The out-of-scope `uncertain-binary` case uses `flect-binary-surrogate-v1`.
 

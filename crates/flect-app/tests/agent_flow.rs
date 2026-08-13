@@ -15,6 +15,7 @@ const COMMIT_SENTINEL: &str = "COMMIT_SECRET_8821";
 const CONVERSATION_SENTINEL: &str = "CONVERSATION_SECRET_D401";
 
 #[test]
+#[allow(clippy::too_many_lines)]
 fn complete_agent_handoff_is_blind_validated_and_persisted() {
     let repository = fixture_repository();
     let workspace = tempfile::tempdir().unwrap();

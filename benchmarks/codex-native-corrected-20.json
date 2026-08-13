@@ -36,6 +36,8 @@
     "harness_tree": "9d619fea91b7030bf3484b54fe5f7c6940c8731f",
     "suite_sha256": "141DDF6DEC1EC21A60E96A14B965C1CF2CBAA07B07B7E8A6ED182F857B6FD36E",
     "flect_binary_sha256": "9CAA0E3E787F3509D6FF1DD895C066AE2CD52BC61367F0A592726EA1C0F2311F",
+    "post_run_ci_commit": "pending",
+    "post_run_ci_change": "test-only clippy::too_many_lines allowance; no production or harness behavior change",
     "run_root": "benchmark-40-corrected",
     "controller_root": "benchmark-40-corrected-controller",
     "run_id": "benchmark-40-corrected"
