@@ -27,8 +27,8 @@ Direct API mode:
 
 ```console
 flect init
-flect config set runner.model gpt-5.6-luna
-flect config set runner.fallback_model gpt-5.6-terra
+# Defaults: gpt-5.6-luna primary, with one gpt-5.6-terra fallback.
+# Override either model only when your project needs a different route.
 flect config set runner.kind api
 flect start --task "Fix token expiry without changing legacy auth"
 # code and normal tests
@@ -123,7 +123,7 @@ Recommended action
   REVISE PATCH
 ```
 
-`--echoed-spec` is an offline Milestone 1 seam, primarily for deterministic tests and evaluation fixtures. Omitting it uses the bundled mock runner and produces `UNCERTAIN`. Real provider configuration is not silently simulated.
+`--echoed-spec` is an offline deterministic seam, primarily for tests and evaluation fixtures. Omitting it uses the bundled mock runner and produces `UNCERTAIN`. Real provider configuration is not silently simulated.
 
 ## Responses API transport
 
@@ -135,6 +135,7 @@ kind = "api"
 protocol = "responses"
 base_url = "https://api.openai.com/v1"
 api_key_env = "OPENAI_API_KEY"
+# Defaults shown explicitly; either value remains configurable.
 model = "gpt-5.6-luna"
 fallback_model = "gpt-5.6-terra"
 reasoning_effort = "medium"
@@ -189,7 +190,7 @@ Completed Codex-native handoffs persist the verification record and then remove 
 
 ## Codex MCP
 
-`flect mcp` exposes the automated tools plus `flect_prepare_blind`, `flect_submit_echo`, `flect_prepare_reconciliation`, and `flect_submit_verdict`. Agent handoff tools call the shared `flect-app` service directly; all modes converge on the same domain records and project-local state. See [Codex MCP integration](docs/mcp.md) for lifecycle, errors, and `.codex/config.toml` setup.
+`flect mcp` exposes the automated tools plus `flect_prepare_blind`, `flect_submit_echo`, `flect_prepare_reconciliation`, and the typed `flect_judge_*` lifecycle. Agent handoff tools call the shared `flect-app` service directly; all modes converge on the same domain records and project-local state. See [Codex MCP integration](docs/mcp.md) for lifecycle, errors, and `.codex/config.toml` setup.
 
 ## Evaluation
 

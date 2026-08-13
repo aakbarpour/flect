@@ -20,7 +20,7 @@ flect-cli ─────> flect-app ─────> flect-core
 
 API mode asks configured Responses-compatible models to perform forward analysis, blind reconstruction, and reconciliation. Codex-native mode delegates only the two reasoning steps through typed jobs: a fresh blind verifier receives sanitized read-only resources, and a separate fresh judge receives the accepted echo plus intended specification. Flect remains authoritative for Git capture, filtering, schemas, job binding, evidence validation, persistence, and assurance metadata.
 
-Prepared agent workspaces live under the operating-system temporary directory rather than the repository. They exclude `.git`, `.flect`, the task, forward specification, and task-bearing metadata. Files are marked read-only, but this is reported as `structural` isolation because a shared Codex runtime may still allow a child to inspect paths outside that workspace. After a successful judged result is persisted, Flect removes the matching Flect-owned temporary workspace by default; incomplete workspaces remain until explicitly cleaned. Cleanup verifies canonical ownership, containment, and repository separation before removal.
+Prepared agent workspaces live under the operating-system temporary directory rather than the repository. They exclude `.git`, `.flect`, the task, forward specification, and task-bearing metadata. Files are marked read-only, but this is reported as `structural` isolation because a shared Codex runtime may still allow a child to inspect paths outside that workspace. Native children write only the exact primitive filesystem contract: extensionless scalars, zero-based consecutive six-digit entries, actual model-selection metadata, and a final zero-byte `submitted` marker. After a successful judged result is persisted, Flect removes the matching Flect-owned temporary workspace by default; incomplete workspaces remain until explicitly cleaned. Cleanup verifies canonical ownership, containment, and repository separation before removal.
 
 ## Verification flow
 
@@ -30,7 +30,7 @@ Prepared agent workspaces live under the operating-system temporary directory ra
 4. `BlindGuard` fails closed if task-bearing Git metadata is configured for inclusion and creates the only payload accepted by a verifier.
 5. The configured runner returns `EchoedSpec` from only the serialized blind bundle. Offline mode uses a deterministic fixture or explicitly uncertain file-level baseline.
 6. API mode semantically reconciles intended and echoed specifications; offline mode uses the conservative deterministic reconciler.
-7. Flect removes any model-produced evidence location that cannot be tied back to an actual changed file and verbatim patch hunk, then persists the `VerificationRecord` and safe model-call metadata.
+7. The judge emits only `alignment`, `findings[{kind,text,evidence_ref}]`, and `confidence`. Trusted `materialize_judge_verdict` resolves stable evidence references and derives persisted finding IDs, recommended action, file paths, exact hunks, and line ranges. Unknown or fabricated references reject the verdict; they are not silently removed. Flect then persists the `VerificationRecord` and safe model-call metadata.
 
 ## State format
 
@@ -43,8 +43,8 @@ Project-local state is stored beneath `.flect/`:
 └── results/<run-id>.json
 ```
 
-Documents carry a `version` field. A run stores the repository root, immutable base revision, original task, forward spec, safe model-call metadata, and creation timestamp. This sensitive task state remains local and is never copied into a blind bundle. Result files contain the sanitized bundle, echoed spec, verdict, safe model-call metadata, and timestamp.
+Run and result JSON plus the `latest` pointer are written through same-directory temporary files and atomic replacement. Documents carry a `version` field. A run stores the repository root, immutable base revision, original task, forward spec, safe model-call metadata, and creation timestamp. This sensitive task state remains local and is never copied into a blind bundle. Result files contain the sanitized bundle, echoed spec, verdict, safe model-call metadata, and timestamp.
 
 ## Deliberate limits
 
-Repository-copy context, model repair loops beyond one bounded fallback, evaluation execution, CI mode, and release packaging are later milestones. No empty interfaces or placeholder crates exist for them.
+Repository-copy context, model repair loops beyond one bounded fallback, and automated CI verdict enforcement are deliberate non-goals for v0.1.0. Deterministic Benchmark v1 infrastructure and release packaging exist, but their presence is not an effectiveness claim or a published model-backed benchmark result.

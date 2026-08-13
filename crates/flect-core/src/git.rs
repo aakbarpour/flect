@@ -2,6 +2,8 @@
 
 use std::ffi::OsStr;
 use std::fs;
+use std::io::Read;
+use std::path::Component;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
 
@@ -41,6 +43,8 @@ pub enum GitError {
         path: String,
         source: std::io::Error,
     },
+    #[error("refusing to capture untracked path {path}: {reason}")]
+    UnsafeUntrackedPath { path: String, reason: String },
     #[error(
         "captured patch is {actual} bytes, exceeding the configured {limit}-byte limit; narrow the patch or raise `verification.max_patch_bytes`"
     )]
@@ -150,7 +154,7 @@ impl GitRepository {
         let mut total_bytes = 0_u64;
         for (status, old_path, path) in changes {
             let changed_file = if status == FileStatus::Untracked {
-                self.capture_untracked(&path)?
+                self.capture_untracked(&path, max_patch_bytes.saturating_sub(total_bytes))?
             } else {
                 self.capture_tracked(base_revision, status, old_path, path)?
             };
@@ -234,12 +238,48 @@ impl GitRepository {
         })
     }
 
-    fn capture_untracked(&self, path: &str) -> Result<ChangedFile, GitError> {
+    fn capture_untracked(&self, path: &str, remaining_bytes: u64) -> Result<ChangedFile, GitError> {
+        if Path::new(path)
+            .components()
+            .any(|component| !matches!(component, Component::Normal(_)))
+        {
+            return Err(GitError::UnsafeUntrackedPath {
+                path: path.to_owned(),
+                reason: "path is not a repository-relative normal path".to_owned(),
+            });
+        }
         let absolute = self.root.join(path);
-        let bytes = fs::read(&absolute).map_err(|source| GitError::ReadFile {
+        let metadata = fs::symlink_metadata(&absolute).map_err(|source| GitError::ReadFile {
             path: absolute.display().to_string(),
             source,
         })?;
+        if !metadata.file_type().is_file() {
+            return Err(GitError::UnsafeUntrackedPath {
+                path: path.to_owned(),
+                reason: "symlinks and non-regular files are not captured".to_owned(),
+            });
+        }
+        let canonical_root = fs::canonicalize(&self.root).map_err(|source| GitError::ReadFile {
+            path: self.root.display().to_string(),
+            source,
+        })?;
+        let canonical_file = fs::canonicalize(&absolute).map_err(|source| GitError::ReadFile {
+            path: absolute.display().to_string(),
+            source,
+        })?;
+        if !canonical_file.starts_with(&canonical_root) {
+            return Err(GitError::UnsafeUntrackedPath {
+                path: path.to_owned(),
+                reason: "resolved path is outside the repository".to_owned(),
+            });
+        }
+        if metadata.len() > remaining_bytes {
+            return Err(GitError::PatchTooLarge {
+                actual: metadata.len(),
+                limit: remaining_bytes,
+            });
+        }
+        let bytes = read_bounded_regular_file(&absolute, path, remaining_bytes)?;
         let text = String::from_utf8(bytes).ok();
         let binary = text
             .as_ref()
@@ -287,6 +327,41 @@ impl GitRepository {
             .output()
             .map_err(|error| map_spawn_error(&error))
     }
+}
+
+fn read_bounded_regular_file(
+    absolute: &Path,
+    repository_path: &str,
+    limit: u64,
+) -> Result<Vec<u8>, GitError> {
+    let file = fs::File::open(absolute).map_err(|source| GitError::ReadFile {
+        path: absolute.display().to_string(),
+        source,
+    })?;
+    let metadata = file.metadata().map_err(|source| GitError::ReadFile {
+        path: absolute.display().to_string(),
+        source,
+    })?;
+    if !metadata.is_file() {
+        return Err(GitError::UnsafeUntrackedPath {
+            path: repository_path.to_owned(),
+            reason: "opened object is not a regular file".to_owned(),
+        });
+    }
+    let mut bytes = Vec::new();
+    file.take(limit.saturating_add(1))
+        .read_to_end(&mut bytes)
+        .map_err(|source| GitError::ReadFile {
+            path: absolute.display().to_string(),
+            source,
+        })?;
+    if bytes.len() as u64 > limit {
+        return Err(GitError::PatchTooLarge {
+            actual: bytes.len() as u64,
+            limit,
+        });
+    }
+    Ok(bytes)
 }
 
 fn parse_name_status(bytes: &[u8]) -> Result<Vec<(FileStatus, Option<String>, String)>, GitError> {

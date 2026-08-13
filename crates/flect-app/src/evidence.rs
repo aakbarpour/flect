@@ -30,6 +30,8 @@ pub enum EvidenceError {
     InvalidConfidence,
     #[error("judge findings must contain non-empty text")]
     EmptyFindingText,
+    #[error("potential side effect duplicates a base divergence finding")]
+    DuplicateSideEffect,
 }
 
 /// Converts the compact judge payload into Flect's persisted verdict.
@@ -94,6 +96,26 @@ fn validate_judge_semantics(judge: &JudgeVerdict) -> Result<(), EvidenceError> {
     {
         return Err(EvidenceError::EmptyFindingText);
     }
+    let base_findings = judge
+        .findings
+        .iter()
+        .filter(|finding| {
+            matches!(
+                finding.kind,
+                FindingCategory::UnrequestedChanges | FindingCategory::ViolatedConstraints
+            )
+        })
+        .map(|finding| normalized_finding_text(&finding.text))
+        .collect::<Vec<_>>();
+    if judge
+        .findings
+        .iter()
+        .filter(|finding| finding.kind == FindingCategory::PotentialSideEffects)
+        .map(|finding| normalized_finding_text(&finding.text))
+        .any(|side_effect| base_findings.contains(&side_effect))
+    {
+        return Err(EvidenceError::DuplicateSideEffect);
+    }
     let compatible = match judge.alignment {
         Alignment::Same => judge.findings.is_empty(),
         Alignment::Partial | Alignment::Different => !judge.findings.is_empty(),
@@ -102,6 +124,13 @@ fn validate_judge_semantics(judge: &JudgeVerdict) -> Result<(), EvidenceError> {
     compatible
         .then_some(())
         .ok_or(EvidenceError::IncompatibleJudgeOutput(judge.alignment))
+}
+
+fn normalized_finding_text(text: &str) -> String {
+    text.split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
+        .to_ascii_lowercase()
 }
 
 fn findings_for(judge: &JudgeVerdict, category: FindingCategory) -> Vec<String> {

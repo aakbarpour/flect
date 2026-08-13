@@ -5,9 +5,10 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use flect_core::{
-    BlindAgentJob, BlindAgentSubmission, BlindBundle, BlindGuard, Config, ContextBuilder,
-    ContextPolicy, EchoedSpec, GitRepository, IsolationLevel, ModelCallRecord,
-    ReconciliationAgentJob, ReconciliationAgentSubmission, RunStore, VerificationRecord,
+    AgentModelSelection, Alignment, BlindAgentJob, BlindAgentSubmission, BlindBundle, BlindGuard,
+    Config, ContextBuilder, ContextPolicy, EchoedSpec, FindingCategory, GitRepository,
+    IsolationLevel, JudgeFinding, JudgeVerdict, ModelCallRecord, ReconciliationAgentJob, RunStore,
+    VerificationRecord,
 };
 use schemars::{JsonSchema, schema_for};
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
@@ -16,8 +17,8 @@ use thiserror::Error;
 
 use crate::{EvidenceError, materialize_judge_verdict};
 
-const VERIFIER_INSTRUCTIONS: &str = "You are the blind Flect verifier. You have not been given the original task. Do not attempt to discover it. Inspect only the supplied sanitized patch evidence. Determine what behavior this patch appears to add, remove, or change. Return only a valid EchoedSpec matching the supplied schema. Each affected_scope entry is an object: file must exactly equal a path in the supplied manifest; symbol is optional descriptive function, class, or region detail and is not a path. Do not perform general style review. Do not invent files, lines, requirements, or motivations. Preserve uncertainty.";
-const JUDGE_INSTRUCTIONS: &str = "You are the Flect reconciliation judge. Return JSON only: one object matching verdict_schema, with no wrapper, prose, Markdown, or extra keys. Compare IntendedSpec with EchoedSpec and make only the smallest semantic judgment: alignment, findings, and confidence. Each finding has kind, text, and optional evidence_ref. Use only kind values and evidence_ref values listed in evidence_contract. Never emit actions, IDs, files, patch text, line ranges, summaries, or uncertainties. SAME must have zero findings; PARTIAL and DIFFERENT must have at least one finding. Flect derives the trusted persisted Verdict.";
+const VERIFIER_INSTRUCTIONS: &str = "You are the blind Flect verifier. You have not been given the original task. Do not attempt to discover it. Inspect only the supplied sanitized patch evidence and determine what behavior the patch appears to add, remove, or change. Do not execute Flect or any repository command, write JSON, write to the repository, or use chat as the protocol payload. Write only the permitted primitive UTF-8 files in the assigned Flect draft root. Write every non-marker value with no UTF-8 BOM and no trailing carriage return or newline; use an exact-byte file API rather than a line-oriented writer. Scalar files are named exactly `objective`, `confidence`, `model`, and `model_selection`, with no extension. `model` records the actual runtime model and `model_selection` is exactly `explicit`, `inherited`, or `unknown`. List entries use consecutive zero-based six-digit names beginning at `000000.txt` in `behavior_before`, `behavior_after`, `side_effects`, `assumptions`, and `uncertainties`. Scope entries use consecutive zero-based six-digit directories beginning at `affected_scope/000000`, each containing extensionless `file` and optional `symbol`. Each scope file's exact bytes must equal one path in the supplied manifest. Leave a list directory empty when there are no entries; never invent placeholder content. Create `submitted` last as an exactly zero-byte file, then verify its length is zero. Do not add any other file or directory. Flect owns job binding, structure, validation, and serialization. Do not perform general style review or invent files, lines, requirements, or motivations. Preserve uncertainty.";
+const JUDGE_INSTRUCTIONS: &str = "You are the Flect reconciliation judge. Do not execute Flect or repository commands, write JSON, write to the repository, or use chat as the protocol payload. Write only the permitted primitive UTF-8 files in the assigned Flect draft root. Write every non-marker value with no UTF-8 BOM and no trailing carriage return or newline; use an exact-byte file API rather than a line-oriented writer. Scalar files are named exactly `confidence`, `model`, and `model_selection`, with no extension. `model` records the actual runtime model and `model_selection` is exactly `explicit`, `inherited`, or `unknown`. Create exactly one empty alignment marker directory: `alignment/SAME`, `alignment/PARTIAL`, `alignment/DIFFERENT`, or `alignment/UNCERTAIN`. Finding entries use consecutive zero-based six-digit directories beginning at `findings/000000`; each contains one empty kind-marker directory named `missing_requirement`, `unrequested_change`, `violated_constraint`, or `potential_side_effect`, plus extensionless `text` and optional `evidence_ref`. Use only IDs from evidence_ref_contract. For every listed `side_effect/<n>`, create exactly one disposition under `side_effect_dispositions/side_effect/<n>`: either `finding` containing extensionless `text` and `evidence_ref`, or `not-distinct` containing extensionless `reason`. A verifier side-effect candidate is distinct only when it describes a downstream consequence beyond the base divergence itself, even when both arise from the same changed hunk. Caller migration or newly exposed sensitive data are downstream consequences; specifically, logging request-derived identifiers, keys, or values is both an unrequested behavior and a potential disclosure/observability side effect. The changed API, added output, wrong-component behavior, or altered label itself is only the violated constraint or unrequested change. Mark a candidate not-distinct when its semantic claim is the base behavior itself, but not merely because it shares a cause or evidence reference with a genuine downstream consequence. Create `submitted` last as an exactly zero-byte file, then verify its length is zero. Do not add any other file or directory. Compare IntendedSpec with EchoedSpec for complete alignment: surface scope creep, unrelated behavior, added functionality, and task-boundary violations. A constraint violation or downstream side effect alone does not establish DIFFERENT; use PARTIAL when the requested objective is materially advanced with divergence. DIFFERENT requires a missing requirement or unrequested change that supports unrelated, replacing, or contradictory work. Each verifier-reported side effect must be explicitly dispositioned; do not emit a potential_side_effect that merely restates the same divergence. SAME must have zero findings; PARTIAL and DIFFERENT must have at least one finding. Flect owns job binding, serialization, evidence materialization, and persistence.";
 static JOB_SEQUENCE: AtomicU64 = AtomicU64::new(0);
 
 #[derive(Debug, Error)]
@@ -45,10 +46,14 @@ pub enum AgentWorkflowError {
     InvalidJobState(String),
     #[error("agent submission job ID does not match `{0}`")]
     JobMismatch(String),
+    #[error("submission file is not the designated file for agent job `{0}")]
+    SubmissionFileMismatch(String),
     #[error("blind response references unavailable scope `{0}`")]
     UnavailableScope(String),
     #[error("agent state is invalid: {0}")]
     InvalidState(String),
+    #[error("DIFFERENT requires a missing requirement or unrequested change finding")]
+    DifferentWithoutObjectiveMismatch,
     #[error("agent workspace ownership could not be established for {0}")]
     UnsafeCleanup(String),
     #[error("submitted verdict failed trusted validation: {0}")]
@@ -152,13 +157,17 @@ impl AgentService {
         let bundle = self.build_bundle(&config, &run.base_revision)?;
         let job_id = generate_id("blind", &run.id)?;
         let workspace = self.create_blind_workspace(&job_id, &bundle)?;
+        let draft_root = external_draft_root(&self.workspace_root, &job_id);
         let job = BlindAgentJob {
             version: 1,
             job_id: job_id.clone(),
             run_id: run.id,
             isolation: IsolationLevel::Structural,
             workspace: workspace.display().to_string(),
-            instructions: VERIFIER_INSTRUCTIONS.to_owned(),
+            instructions: format!(
+                "{VERIFIER_INSTRUCTIONS} The assigned draft root is `{}`. The trusted parent commits only the bound job ID.",
+                draft_root.display()
+            ),
             bundle,
             echoed_spec_schema: strict_schema::<EchoedSpec>()?,
             allowed_resources: vec![
@@ -185,6 +194,7 @@ impl AgentService {
             model: None,
             model_selection: flect_core::AgentModelSelection::Unknown,
         })?;
+        ExternalVerifierService::new(&self.workspace_root)?.create(&job)?;
         Ok(job)
     }
 
@@ -236,6 +246,34 @@ impl AgentService {
         Ok(submission.echoed_spec)
     }
 
+    /// Commits a completed external typed verifier draft into repository Flect state.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the job is not bound to this repository or its verifier lifecycle
+    /// has not completed successfully.
+    pub fn verifier_commit(&self, job_id: &str) -> Result<EchoedSpec, AgentWorkflowError> {
+        let external = ExternalVerifierService::new(&self.workspace_root)?;
+        let draft = if external_draft_root(&self.workspace_root, job_id)
+            .join("submitted")
+            .is_file()
+        {
+            external.completed_filesystem(job_id)?
+        } else {
+            external.completed(job_id)?
+        };
+        let state = self.load_blind_state(job_id)?;
+        if state.job.run_id != draft.run_id || state.status != BlindStatus::Prepared {
+            return Err(AgentWorkflowError::InvalidJobState(job_id.to_owned()));
+        }
+        self.submit_echo(BlindAgentSubmission {
+            job_id: job_id.to_owned(),
+            echoed_spec: draft.echoed_spec,
+            model: draft.model,
+            model_selection: draft.model_selection,
+        })
+    }
+
     /// Creates a distinct judge job from an accepted blind response.
     ///
     /// # Errors
@@ -259,17 +297,34 @@ impl AgentService {
         let run = RunStore::new(self.repository.root())
             .load_run(Some(&blind.job.run_id))
             .map_err(|error| AgentWorkflowError::RunState(error.to_string()))?;
+        let job_id = generate_id("judge", &blind.job.run_id)?;
+        let evidence_ref_contract = evidence_ref_contract(&blind.job.bundle, &echoed_spec);
+        let draft_root = external_draft_root(&self.workspace_root, &job_id);
+        let workspace = self.create_reconciliation_workspace(
+            &job_id,
+            &run.intended_spec,
+            &echoed_spec,
+            &evidence_ref_contract,
+        )?;
         let job = ReconciliationAgentJob {
             version: 1,
-            job_id: generate_id("judge", &blind.job.run_id)?,
+            job_id: job_id.clone(),
             run_id: blind.job.run_id.clone(),
             blind_job_id: blind.job.job_id.clone(),
-            instructions: JUDGE_INSTRUCTIONS.to_owned(),
+            workspace: workspace.display().to_string(),
+            instructions: format!(
+                "{JUDGE_INSTRUCTIONS} The assigned draft root is `{}`. The trusted parent submits only the bound job ID.",
+                draft_root.display()
+            ),
+            allowed_resources: vec![
+                "intended-spec.json".to_owned(),
+                "echoed-spec.json".to_owned(),
+                "evidence-ref-contract.json".to_owned(),
+                "JUDGE.md".to_owned(),
+            ],
             intended_spec: run.intended_spec,
             echoed_spec,
-            available_evidence: blind.job.bundle.patch.files.clone(),
-            evidence_contract: evidence_contract(&blind.job.bundle),
-            verdict_schema: strict_schema::<flect_core::JudgeVerdict>()?,
+            evidence_ref_contract,
         };
         self.save_reconciliation_state(&ReconciliationState {
             version: 1,
@@ -278,27 +333,209 @@ impl AgentService {
             bundle: blind.job.bundle,
             blind_model: blind.model,
             blind_model_selection: blind.model_selection,
+            draft: None,
         })?;
+        create_judge_draft(&external_draft_root(&self.workspace_root, &job_id))?;
         Ok(job)
     }
 
-    /// Validates a judge response and persists the final verification record.
+    /// Starts a Flect-owned typed judge submission. No judge-authored JSON is accepted.
     ///
     /// # Errors
     ///
-    /// Returns an error for invalid lifecycle, fabricated evidence, or persistence failure.
-    pub fn submit_verdict(
+    /// Returns an error when the job is missing or not prepared.
+    pub fn judge_begin(
         &self,
-        submission: ReconciliationAgentSubmission,
-    ) -> Result<VerificationRecord, AgentWorkflowError> {
-        let mut state = self.load_reconciliation_state(&submission.job_id)?;
-        if state.status != ReconciliationStatus::Prepared {
-            return Err(AgentWorkflowError::InvalidJobState(submission.job_id));
+        job_id: &str,
+        model: Option<String>,
+        model_selection: AgentModelSelection,
+    ) -> Result<(), AgentWorkflowError> {
+        let mut state = self.load_reconciliation_state(job_id)?;
+        if state.status != ReconciliationStatus::Prepared || state.job.job_id != job_id {
+            return Err(AgentWorkflowError::InvalidJobState(job_id.to_owned()));
         }
-        if state.job.job_id != submission.job_id {
-            return Err(AgentWorkflowError::JobMismatch(state.job.job_id));
+        state.status = ReconciliationStatus::Collecting;
+        state.draft = Some(JudgeDraft {
+            alignment: None,
+            confidence: None,
+            findings: Vec::new(),
+            side_effect_dispositions: Vec::new(),
+            model,
+            model_selection,
+        });
+        self.save_reconciliation_state(&state)
+    }
+
+    /// Sets alignment on an active typed judge submission.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the job is missing or not collecting.
+    pub fn judge_set_alignment(
+        &self,
+        job_id: &str,
+        alignment: Alignment,
+    ) -> Result<(), AgentWorkflowError> {
+        self.with_judge_draft(job_id, |draft| draft.alignment = Some(alignment))
+    }
+
+    /// Adds one semantic finding to an active typed judge submission.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the job is missing or not collecting.
+    pub fn judge_add_finding(
+        &self,
+        job_id: &str,
+        kind: FindingCategory,
+        text: String,
+        evidence_ref: Option<String>,
+    ) -> Result<(), AgentWorkflowError> {
+        self.with_judge_draft(job_id, |draft| {
+            draft.findings.push(JudgeFinding {
+                kind,
+                text,
+                evidence_ref,
+            });
+        })
+    }
+
+    /// Sets confidence on an active typed judge submission.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the job is missing or not collecting.
+    pub fn judge_set_confidence(
+        &self,
+        job_id: &str,
+        confidence: f64,
+    ) -> Result<(), AgentWorkflowError> {
+        self.with_judge_draft(job_id, |draft| draft.confidence = Some(confidence))
+    }
+
+    /// Adds a distinct verifier-reported side effect as a typed finding.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error for an unavailable or already dispositioned candidate.
+    pub fn judge_add_side_effect_finding(
+        &self,
+        job_id: &str,
+        candidate: String,
+        text: String,
+        evidence_ref: String,
+    ) -> Result<(), AgentWorkflowError> {
+        self.with_judge_state(job_id, |echoed_spec, draft| {
+            let side_effect_index = side_effect_candidate_index(echoed_spec, &candidate)?;
+            if draft
+                .side_effect_dispositions
+                .iter()
+                .any(|disposition| disposition.candidate == candidate)
+            {
+                return Err(AgentWorkflowError::InvalidState(format!(
+                    "side effect candidate `{candidate}` was already dispositioned"
+                )));
+            }
+            let finding_index = draft.findings.len();
+            draft.findings.push(JudgeFinding {
+                kind: FindingCategory::PotentialSideEffects,
+                text,
+                evidence_ref: Some(evidence_ref),
+            });
+            draft.side_effect_dispositions.push(SideEffectDisposition {
+                candidate,
+                side_effect_index,
+                kind: SideEffectDispositionKind::Finding { finding_index },
+            });
+            Ok(())
+        })
+    }
+
+    /// Marks a verifier-reported side effect as not a distinct finding.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error for an unavailable candidate, duplicate disposition, or empty reason.
+    pub fn judge_mark_side_effect_not_distinct(
+        &self,
+        job_id: &str,
+        candidate: String,
+        reason: String,
+    ) -> Result<(), AgentWorkflowError> {
+        self.with_judge_state(job_id, |echoed_spec, draft| {
+            let side_effect_index = side_effect_candidate_index(echoed_spec, &candidate)?;
+            if reason.trim().is_empty() {
+                return Err(AgentWorkflowError::InvalidState(
+                    "side effect non-distinct reason must not be empty".to_owned(),
+                ));
+            }
+            if draft
+                .side_effect_dispositions
+                .iter()
+                .any(|disposition| disposition.candidate == candidate)
+            {
+                return Err(AgentWorkflowError::InvalidState(format!(
+                    "side effect candidate `{candidate}` was already dispositioned"
+                )));
+            }
+            draft.side_effect_dispositions.push(SideEffectDisposition {
+                candidate,
+                side_effect_index,
+                kind: SideEffectDispositionKind::NotDistinct { reason },
+            });
+            Ok(())
+        })
+    }
+
+    /// Validates Flect-owned typed semantic state, constructs the domain verdict, and persists it.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error for incomplete state, invalid semantics, invalid evidence, or persistence failure.
+    pub fn judge_submit(&self, job_id: &str) -> Result<VerificationRecord, AgentWorkflowError> {
+        let mut state = self.load_reconciliation_state(job_id)?;
+        if state.job.job_id != job_id {
+            return Err(AgentWorkflowError::InvalidJobState(job_id.to_owned()));
         }
-        let verdict = materialize_judge_verdict(submission.verdict, &state.bundle)?;
+        let filesystem_submitted =
+            is_regular_file(&external_draft_root(&self.workspace_root, job_id).join("submitted"));
+        if state.status == ReconciliationStatus::Prepared && filesystem_submitted {
+            state.status = ReconciliationStatus::Collecting;
+            state.draft = Some(JudgeDraft {
+                alignment: None,
+                confidence: None,
+                findings: Vec::new(),
+                side_effect_dispositions: Vec::new(),
+                model: None,
+                model_selection: AgentModelSelection::Unknown,
+            });
+        }
+        if state.status != ReconciliationStatus::Collecting {
+            return Err(AgentWorkflowError::InvalidJobState(job_id.to_owned()));
+        }
+        let draft = if filesystem_submitted {
+            read_judge_filesystem(
+                &external_draft_root(&self.workspace_root, job_id),
+                &state.job.echoed_spec,
+            )?
+        } else {
+            state
+                .draft
+                .clone()
+                .ok_or_else(|| AgentWorkflowError::InvalidJobState(job_id.to_owned()))?
+        };
+        validate_side_effect_dispositions(&draft, &state.job.echoed_spec)?;
+        let verdict = JudgeVerdict {
+            alignment: draft.alignment.ok_or_else(|| {
+                AgentWorkflowError::InvalidState("judge alignment was not set".to_owned())
+            })?,
+            findings: draft.findings,
+            confidence: draft.confidence.ok_or_else(|| {
+                AgentWorkflowError::InvalidState("judge confidence was not set".to_owned())
+            })?,
+        };
+        validate_typed_judge_invariants(&verdict)?;
+        let verdict = materialize_judge_verdict(verdict, &state.bundle)?;
         let record = VerificationRecord {
             version: 1,
             run_id: state.job.run_id.clone(),
@@ -312,11 +549,7 @@ impl AgentService {
                     state.blind_model.clone(),
                     state.blind_model_selection,
                 ),
-                agent_call(
-                    "reconciliation",
-                    submission.model.clone(),
-                    submission.model_selection,
-                ),
+                agent_call("reconciliation", draft.model.clone(), draft.model_selection),
             ],
             verified_unix_ms: unix_millis()?,
         };
@@ -332,6 +565,35 @@ impl AgentService {
             self.remove_owned_workspace(&blind.job.job_id)?;
         }
         Ok(record)
+    }
+
+    fn with_judge_draft(
+        &self,
+        job_id: &str,
+        update: impl FnOnce(&mut JudgeDraft),
+    ) -> Result<(), AgentWorkflowError> {
+        self.with_judge_state(job_id, |_, draft| {
+            update(draft);
+            Ok(())
+        })
+    }
+
+    fn with_judge_state(
+        &self,
+        job_id: &str,
+        update: impl FnOnce(&EchoedSpec, &mut JudgeDraft) -> Result<(), AgentWorkflowError>,
+    ) -> Result<(), AgentWorkflowError> {
+        let mut state = self.load_reconciliation_state(job_id)?;
+        if state.status != ReconciliationStatus::Collecting || state.job.job_id != job_id {
+            return Err(AgentWorkflowError::InvalidJobState(job_id.to_owned()));
+        }
+        let draft = state
+            .draft
+            .as_mut()
+            .ok_or_else(|| AgentWorkflowError::InvalidJobState(job_id.to_owned()))?;
+        let echoed_spec = state.job.echoed_spec.clone();
+        update(&echoed_spec, draft)?;
+        self.save_reconciliation_state(&state)
     }
 
     /// Removes only verified Flect-owned job directories.
@@ -446,6 +708,33 @@ impl AgentService {
         Ok(workspace)
     }
 
+    fn create_reconciliation_workspace(
+        &self,
+        job_id: &str,
+        intended_spec: &flect_core::IntendedSpec,
+        echoed_spec: &EchoedSpec,
+        evidence_ref_contract: &Value,
+    ) -> Result<PathBuf, AgentWorkflowError> {
+        validate_job_id(job_id)?;
+        fs::create_dir_all(&self.workspace_root)
+            .map_err(|source| workspace_error(&self.workspace_root, source))?;
+        let repository_root = canonical_existing(self.repository.root())?;
+        let workspace_root = canonical_existing(&self.workspace_root)?;
+        if workspace_root.starts_with(repository_root) {
+            return Err(AgentWorkflowError::UnsafeWorkspace);
+        }
+        let workspace = self.workspace_root.join(job_id);
+        fs::create_dir(&workspace).map_err(|source| workspace_error(&workspace, source))?;
+        write_json_readonly(&workspace.join("intended-spec.json"), intended_spec)?;
+        write_json_readonly(&workspace.join("echoed-spec.json"), echoed_spec)?;
+        write_json_readonly(
+            &workspace.join("evidence-ref-contract.json"),
+            evidence_ref_contract,
+        )?;
+        write_readonly(&workspace.join("JUDGE.md"), JUDGE_INSTRUCTIONS.as_bytes())?;
+        Ok(workspace)
+    }
+
     fn blind_state_path(&self, job_id: &str) -> Result<PathBuf, AgentWorkflowError> {
         validate_job_id(job_id)?;
         Ok(self
@@ -513,7 +802,7 @@ impl AgentService {
     }
 }
 
-fn evidence_contract(bundle: &BlindBundle) -> Value {
+fn evidence_ref_contract(bundle: &BlindBundle, echoed_spec: &EchoedSpec) -> Value {
     let mut hunk_index = 0_u32;
     let files = bundle.patch.files.iter().map(|file| {
         let hunks = file.patch.split("@@ ").skip(1).filter_map(|part| {
@@ -530,7 +819,18 @@ fn evidence_contract(bundle: &BlindBundle) -> Value {
         serde_json::json!({"file": file.path, "hunks": hunks})
     }).collect::<Vec<_>>();
     serde_json::json!({
-        "version": 2,
+        "version": 4,
+        "finding_fields": ["kind", "text", "evidence_ref"],
+        "forbidden_finding_fields": [
+            "evidence",
+            "file",
+            "line",
+            "line_start",
+            "line_end",
+            "patch_hunk",
+            "finding_id",
+            "finding_ids"
+        ],
         "allowed_alignments": ["SAME", "PARTIAL", "DIFFERENT", "UNCERTAIN"],
         "available_finding_kinds": [
             "missing_requirement",
@@ -540,19 +840,29 @@ fn evidence_contract(bundle: &BlindBundle) -> Value {
         ],
         "alignment_meanings": {
             "SAME": "The apparent behavior fulfills the intended objective and material requirements without divergence.",
-            "PARTIAL": "The apparent behavior advances the intended objective but has a missing requirement, violated constraint, or scope divergence.",
-            "DIFFERENT": "The apparent behavior is materially contradictory to or replaces a required behavior, even if a superficial part of the objective changes.",
+            "PARTIAL": "The apparent behavior advances at least one requested objective or requirement but has a missing requirement, violated constraint, added behavior, or scope divergence.",
+            "DIFFERENT": "The apparent behavior is materially unrelated to or contradictory with the requested work; do not use DIFFERENT solely because an otherwise goal-advancing patch violates a constraint.",
             "UNCERTAIN": "The supplied IntendedSpec and EchoedSpec are insufficient for a semantic judgment."
         },
+        "finding_kind_guidance": {
+            "missing_requirement": "A requested requirement or acceptance condition is absent or not met.",
+            "unrequested_change": "The patch adds, broadens, or changes behavior outside the objective, requirements, expected scope, or non-goals, even when the requested behavior is also present.",
+            "violated_constraint": "The patch conflicts with an explicit constraint or task boundary.",
+            "potential_side_effect": "A distinct plausible externally observable impact of an added, broadened, or constraint-violating behavior. When a supported unrequested change or violated constraint has a separately described consequence in EchoedSpec behavior_after or side_effects, emit both findings with the same evidence reference; do not treat one category as a substitute for the other."
+        },
         "rules": [
-            "Return the verdict_schema object directly; do not add a verdict wrapper.",
-            "recommended_action, file, patch text, line ranges, and persisted finding IDs are derived by Flect and must not be emitted.",
-            "Each finding has kind, text, and optional evidence_ref. evidence_ref, when present, must equal one listed stable hunk ID.",
+            "submission_schema is the only judge-output schema; do not return a verdict wrapper or another object.",
+            "Each finding may contain only kind, text, and optional evidence_ref. evidence, file, line, patch_hunk, finding_id, and persisted evidence fields are forbidden.",
+            "evidence_ref, when present, must equal one listed stable hunk ID.",
             "SAME requires findings to be empty; PARTIAL and DIFFERENT require at least one finding.",
+            "Do not return SAME merely because a requested change is present; SAME requires no supported divergence from the full IntendedSpec.",
+            "DIFFERENT requires at least one missing_requirement or unrequested_change finding; violated_constraint and potential_side_effect findings alone do not establish objective mismatch.",
+            "Every side_effect candidate must be dispositioned before submit. Use a typed side-effect finding with valid evidence only for a downstream consequence beyond the base behavior itself, such as caller migration or newly exposed sensitive data. Logging request-derived identifiers, keys, or values is both an unrequested change and a potential disclosure/observability side effect. A changed API, added output, wrong-component behavior, or altered label itself remains only the base category. A downstream consequence may share a cause or hunk with the base divergence.",
             "confidence is required and must be a number from 0 through 1."
         ],
         "finding_example": files.iter().find_map(|file| file["hunks"].as_array().and_then(|hunks| hunks.first()).map(|hunk| serde_json::json!({"kind": "violated_constraint", "text": "The changed setting violates the constraint.", "evidence_ref": hunk["hunk_id"]}))),
-        "files": files
+        "files": files,
+        "side_effect_candidates": echoed_spec.side_effects.iter().enumerate().map(|(index, text)| serde_json::json!({"id": format!("side_effect/{index}"), "text": text})).collect::<Vec<_>>()
     })
 }
 
@@ -564,6 +874,699 @@ struct BlindState {
     echoed_spec: Option<EchoedSpec>,
     model: Option<String>,
     model_selection: flect_core::AgentModelSelection,
+}
+
+/// Repository-independent typed verifier commands for a prepared blind job.
+pub struct ExternalVerifierService {
+    workspace_root: PathBuf,
+}
+
+#[allow(clippy::missing_errors_doc)]
+impl ExternalVerifierService {
+    /// Opens Flect's external agent-workspace root without repository discovery.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the workspace root cannot be safely resolved.
+    pub fn discover() -> Result<Self, AgentWorkflowError> {
+        Self::new(&std::env::temp_dir().join("flect-agent-jobs"))
+    }
+
+    /// Opens an explicit external verifier workspace root for embedding and tests.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the workspace root cannot be safely resolved.
+    pub fn new_for_tests(workspace_root: &Path) -> Result<Self, AgentWorkflowError> {
+        Self::new(workspace_root)
+    }
+
+    fn new(workspace_root: &Path) -> Result<Self, AgentWorkflowError> {
+        let workspace_root = resolve_with_missing(workspace_root)?;
+        Ok(Self { workspace_root })
+    }
+
+    fn create(&self, job: &BlindAgentJob) -> Result<(), AgentWorkflowError> {
+        let draft = external_draft_root(&self.workspace_root, &job.job_id);
+        fs::create_dir_all(draft.join("behavior_before"))
+            .map_err(|source| workspace_error(&draft, source))?;
+        fs::create_dir_all(draft.join("behavior_after"))
+            .map_err(|source| workspace_error(&draft, source))?;
+        fs::create_dir_all(draft.join("affected_scope"))
+            .map_err(|source| workspace_error(&draft, source))?;
+        fs::create_dir_all(draft.join("side_effects"))
+            .map_err(|source| workspace_error(&draft, source))?;
+        fs::create_dir_all(draft.join("assumptions"))
+            .map_err(|source| workspace_error(&draft, source))?;
+        fs::create_dir_all(draft.join("uncertainties"))
+            .map_err(|source| workspace_error(&draft, source))?;
+        let state = ExternalVerifierState {
+            version: 1,
+            status: VerifierStatus::Prepared,
+            job_id: job.job_id.clone(),
+            run_id: job.run_id.clone(),
+            allowed_paths: job
+                .bundle
+                .patch
+                .files
+                .iter()
+                .map(|file| file.path.clone())
+                .chain(job.bundle.context.iter().map(|file| file.path.clone()))
+                .collect(),
+            draft: None,
+        };
+        self.save(&state)
+    }
+
+    /// Begins Flect-owned verifier collection.
+    pub fn begin(
+        &self,
+        job_id: &str,
+        model: Option<String>,
+        model_selection: AgentModelSelection,
+    ) -> Result<(), AgentWorkflowError> {
+        let mut state = self.load(job_id)?;
+        if state.status != VerifierStatus::Prepared {
+            return Err(AgentWorkflowError::InvalidJobState(job_id.to_owned()));
+        }
+        state.status = VerifierStatus::Collecting;
+        state.draft = Some(VerifierDraft {
+            objective: None,
+            before: Vec::new(),
+            after: Vec::new(),
+            scope: Vec::new(),
+            side_effects: Vec::new(),
+            assumptions: Vec::new(),
+            uncertainties: Vec::new(),
+            confidence: None,
+            model,
+            model_selection,
+        });
+        self.save(&state)
+    }
+
+    /// Sets the apparent objective from a verifier-owned semantic value.
+    pub fn set_objective(&self, job_id: &str, text: String) -> Result<(), AgentWorkflowError> {
+        self.update(job_id, |_state, draft| {
+            draft.objective = Some(text);
+            Ok(())
+        })
+    }
+
+    /// Adds one typed text-list semantic value.
+    pub fn add_text(
+        &self,
+        job_id: &str,
+        field: VerifierTextField,
+        text: String,
+    ) -> Result<(), AgentWorkflowError> {
+        self.update(job_id, |_state, draft| {
+            match field {
+                VerifierTextField::Before => draft.before.push(text),
+                VerifierTextField::After => draft.after.push(text),
+                VerifierTextField::SideEffect => draft.side_effects.push(text),
+                VerifierTextField::Assumption => draft.assumptions.push(text),
+                VerifierTextField::Uncertainty => draft.uncertainties.push(text),
+            }
+            Ok(())
+        })
+    }
+
+    /// Adds an allowed affected scope at the typed boundary.
+    pub fn add_scope(
+        &self,
+        job_id: &str,
+        file: String,
+        symbol: Option<String>,
+    ) -> Result<(), AgentWorkflowError> {
+        self.update(job_id, |state, draft| {
+            if !state.allowed_paths.contains(&file) {
+                return Err(AgentWorkflowError::UnavailableScope(file));
+            }
+            draft.scope.push(flect_core::AffectedScope { file, symbol });
+            Ok(())
+        })
+    }
+
+    /// Sets verifier confidence after finite range validation.
+    pub fn set_confidence(&self, job_id: &str, confidence: f64) -> Result<(), AgentWorkflowError> {
+        if !confidence.is_finite() || !(0.0..=1.0).contains(&confidence) {
+            return Err(AgentWorkflowError::InvalidState(
+                "verifier confidence must be finite and between zero and one".to_owned(),
+            ));
+        }
+        self.update(job_id, |_state, draft| {
+            draft.confidence = Some(confidence);
+            Ok(())
+        })
+    }
+
+    /// Validates and seals one typed verifier draft without repository access.
+    pub fn submit(&self, job_id: &str) -> Result<(), AgentWorkflowError> {
+        let mut state = self.load(job_id)?;
+        if state.status != VerifierStatus::Collecting {
+            return Err(AgentWorkflowError::InvalidJobState(job_id.to_owned()));
+        }
+        let draft = state
+            .draft
+            .as_ref()
+            .ok_or_else(|| AgentWorkflowError::InvalidJobState(job_id.to_owned()))?;
+        if draft.objective.is_none() || draft.confidence.is_none() {
+            return Err(AgentWorkflowError::InvalidState(
+                "verifier objective and confidence must be set".to_owned(),
+            ));
+        }
+        state.status = VerifierStatus::Submitted;
+        self.save(&state)
+    }
+
+    fn completed(&self, job_id: &str) -> Result<CompletedVerifierDraft, AgentWorkflowError> {
+        let state = self.load(job_id)?;
+        if state.status != VerifierStatus::Submitted {
+            return Err(AgentWorkflowError::InvalidJobState(job_id.to_owned()));
+        }
+        let draft = state
+            .draft
+            .ok_or_else(|| AgentWorkflowError::InvalidJobState(job_id.to_owned()))?;
+        Ok(CompletedVerifierDraft {
+            run_id: state.run_id,
+            echoed_spec: EchoedSpec {
+                apparent_objective: draft.objective.unwrap_or_default(),
+                behavior_before: draft.before,
+                behavior_after: draft.after,
+                affected_scope: draft.scope,
+                side_effects: draft.side_effects,
+                assumptions: draft.assumptions,
+                uncertainties: draft.uncertainties,
+                confidence: draft.confidence.unwrap_or_default(),
+            },
+            model: draft.model,
+            model_selection: draft.model_selection,
+        })
+    }
+
+    fn completed_filesystem(
+        &self,
+        job_id: &str,
+    ) -> Result<CompletedVerifierDraft, AgentWorkflowError> {
+        let state = self.load(job_id)?;
+        if state.status != VerifierStatus::Prepared {
+            return Err(AgentWorkflowError::InvalidJobState(job_id.to_owned()));
+        }
+        let root = external_draft_root(&self.workspace_root, job_id);
+        require_marker(&root.join("submitted"))?;
+        let objective = read_required_text(&root.join("objective"))?;
+        let confidence = read_confidence(&root.join("confidence"))?;
+        let model = read_required_text(&root.join("model"))?;
+        let model_selection = read_model_selection(&root.join("model_selection"))?;
+        let before = read_numbered_texts(&root.join("behavior_before"))?;
+        let after = read_numbered_texts(&root.join("behavior_after"))?;
+        let side_effects = read_numbered_texts(&root.join("side_effects"))?;
+        let assumptions = read_numbered_texts(&root.join("assumptions"))?;
+        let uncertainties = read_numbered_texts(&root.join("uncertainties"))?;
+        let scope = read_scopes(&root.join("affected_scope"), &state.allowed_paths)?;
+        let allowed = [
+            "objective",
+            "confidence",
+            "model",
+            "model_selection",
+            "submitted",
+            "behavior_before",
+            "behavior_after",
+            "affected_scope",
+            "side_effects",
+            "assumptions",
+            "uncertainties",
+        ];
+        reject_unexpected_entries(&root, &allowed)?;
+        Ok(CompletedVerifierDraft {
+            run_id: state.run_id,
+            echoed_spec: EchoedSpec {
+                apparent_objective: objective,
+                behavior_before: before,
+                behavior_after: after,
+                affected_scope: scope,
+                side_effects,
+                assumptions,
+                uncertainties,
+                confidence,
+            },
+            model: Some(model),
+            model_selection,
+        })
+    }
+
+    fn update(
+        &self,
+        job_id: &str,
+        update: impl FnOnce(
+            &mut ExternalVerifierState,
+            &mut VerifierDraft,
+        ) -> Result<(), AgentWorkflowError>,
+    ) -> Result<(), AgentWorkflowError> {
+        let mut state = self.load(job_id)?;
+        if state.status != VerifierStatus::Collecting {
+            return Err(AgentWorkflowError::InvalidJobState(job_id.to_owned()));
+        }
+        let mut draft = state
+            .draft
+            .take()
+            .ok_or_else(|| AgentWorkflowError::InvalidJobState(job_id.to_owned()))?;
+        update(&mut state, &mut draft)?;
+        state.draft = Some(draft);
+        self.save(&state)
+    }
+
+    fn state_path(&self, job_id: &str) -> Result<PathBuf, AgentWorkflowError> {
+        validate_job_id(job_id)?;
+        Ok(self.workspace_root.join(format!("{job_id}.verifier.json")))
+    }
+
+    fn load(&self, job_id: &str) -> Result<ExternalVerifierState, AgentWorkflowError> {
+        read_state(&self.state_path(job_id)?, job_id)
+    }
+
+    fn save(&self, state: &ExternalVerifierState) -> Result<(), AgentWorkflowError> {
+        write_state(&self.state_path(&state.job_id)?, state)
+    }
+}
+
+#[derive(Clone, Copy)]
+pub enum VerifierTextField {
+    Before,
+    After,
+    SideEffect,
+    Assumption,
+    Uncertainty,
+}
+
+#[derive(Serialize, Deserialize)]
+struct ExternalVerifierState {
+    version: u32,
+    status: VerifierStatus,
+    job_id: String,
+    run_id: String,
+    allowed_paths: Vec<String>,
+    draft: Option<VerifierDraft>,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+enum VerifierStatus {
+    Prepared,
+    Collecting,
+    Submitted,
+}
+
+#[derive(Serialize, Deserialize)]
+struct VerifierDraft {
+    objective: Option<String>,
+    before: Vec<String>,
+    after: Vec<String>,
+    scope: Vec<flect_core::AffectedScope>,
+    side_effects: Vec<String>,
+    assumptions: Vec<String>,
+    uncertainties: Vec<String>,
+    confidence: Option<f64>,
+    model: Option<String>,
+    model_selection: AgentModelSelection,
+}
+
+struct CompletedVerifierDraft {
+    run_id: String,
+    echoed_spec: EchoedSpec,
+    model: Option<String>,
+    model_selection: AgentModelSelection,
+}
+
+fn external_draft_root(workspace_root: &Path, job_id: &str) -> PathBuf {
+    workspace_root.join(job_id).join("draft")
+}
+
+fn read_required_text(path: &Path) -> Result<String, AgentWorkflowError> {
+    if !is_regular_file(path) {
+        return Err(AgentWorkflowError::InvalidState(format!(
+            "missing draft file {}",
+            path.display()
+        )));
+    }
+    let text = fs::read_to_string(path).map_err(|source| workspace_error(path, source))?;
+    if text.trim().is_empty() {
+        return Err(AgentWorkflowError::InvalidState(format!(
+            "empty draft file {}",
+            path.display()
+        )));
+    }
+    Ok(text)
+}
+
+fn is_regular_file(path: &Path) -> bool {
+    fs::symlink_metadata(path).is_ok_and(|metadata| metadata.file_type().is_file())
+}
+
+fn is_real_dir(path: &Path) -> bool {
+    fs::symlink_metadata(path).is_ok_and(|metadata| metadata.file_type().is_dir())
+}
+
+fn require_marker(path: &Path) -> Result<(), AgentWorkflowError> {
+    if !is_regular_file(path) {
+        return Err(AgentWorkflowError::InvalidState(format!(
+            "missing marker {}",
+            path.display()
+        )));
+    }
+    let contents = fs::read(path).map_err(|source| workspace_error(path, source))?;
+    if !contents.is_empty() {
+        return Err(AgentWorkflowError::InvalidState(format!(
+            "marker must be empty {}",
+            path.display()
+        )));
+    }
+    Ok(())
+}
+
+fn read_confidence(path: &Path) -> Result<f64, AgentWorkflowError> {
+    let text = read_required_text(path)?;
+    let value = text
+        .trim()
+        .parse::<f64>()
+        .map_err(|_| AgentWorkflowError::InvalidState("invalid confidence".to_owned()))?;
+    if !value.is_finite() || !(0.0..=1.0).contains(&value) {
+        return Err(AgentWorkflowError::InvalidState(
+            "invalid confidence".to_owned(),
+        ));
+    }
+    Ok(value)
+}
+
+fn read_model_selection(path: &Path) -> Result<AgentModelSelection, AgentWorkflowError> {
+    match read_required_text(path)?.trim() {
+        "explicit" => Ok(AgentModelSelection::Explicit),
+        "inherited" => Ok(AgentModelSelection::Inherited),
+        "unknown" => Ok(AgentModelSelection::Unknown),
+        _ => Err(AgentWorkflowError::InvalidState(
+            "invalid model selection".to_owned(),
+        )),
+    }
+}
+
+fn read_numbered_texts(dir: &Path) -> Result<Vec<String>, AgentWorkflowError> {
+    if !is_real_dir(dir) {
+        return Err(AgentWorkflowError::InvalidState(format!(
+            "missing draft directory {}",
+            dir.display()
+        )));
+    }
+    let mut entries = fs::read_dir(dir)
+        .map_err(|source| workspace_error(dir, source))?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|source| workspace_error(dir, source))?;
+    entries.sort_by_key(std::fs::DirEntry::file_name);
+    let mut values = Vec::new();
+    for (index, entry) in entries.into_iter().enumerate() {
+        let name = entry.file_name().to_string_lossy().to_string();
+        if name != format!("{index:06}.txt") {
+            return Err(AgentWorkflowError::InvalidState(
+                "invalid or gapped draft entry".to_owned(),
+            ));
+        }
+        values.push(read_required_text(&entry.path())?);
+    }
+    Ok(values)
+}
+
+fn read_scopes(
+    dir: &Path,
+    allowed: &[String],
+) -> Result<Vec<flect_core::AffectedScope>, AgentWorkflowError> {
+    if !is_real_dir(dir) {
+        return Err(AgentWorkflowError::InvalidState(format!(
+            "missing draft directory {}",
+            dir.display()
+        )));
+    }
+    let mut entries = fs::read_dir(dir)
+        .map_err(|source| workspace_error(dir, source))?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|source| workspace_error(dir, source))?;
+    entries.sort_by_key(std::fs::DirEntry::file_name);
+    let mut scopes = Vec::new();
+    for (index, entry) in entries.into_iter().enumerate() {
+        if entry.file_name().to_string_lossy() != format!("{index:06}")
+            || !is_real_dir(&entry.path())
+        {
+            return Err(AgentWorkflowError::InvalidState(
+                "invalid scope entry".to_owned(),
+            ));
+        }
+        let scope = entry.path();
+        let file = read_required_text(&scope.join("file"))?;
+        if !allowed.contains(&file) {
+            return Err(AgentWorkflowError::UnavailableScope(file));
+        }
+        let symbol_path = scope.join("symbol");
+        let symbol = if symbol_path.exists() {
+            Some(read_required_text(&symbol_path)?)
+        } else {
+            None
+        };
+        reject_unexpected_entries(&scope, &["file", "symbol"])?;
+        scopes.push(flect_core::AffectedScope { file, symbol });
+    }
+    Ok(scopes)
+}
+
+fn reject_unexpected_entries(dir: &Path, allowed: &[&str]) -> Result<(), AgentWorkflowError> {
+    for entry in fs::read_dir(dir).map_err(|source| workspace_error(dir, source))? {
+        let entry = entry.map_err(|source| workspace_error(dir, source))?;
+        if !allowed.contains(&entry.file_name().to_string_lossy().as_ref()) {
+            return Err(AgentWorkflowError::InvalidState(format!(
+                "unexpected draft entry {}",
+                entry.path().display()
+            )));
+        }
+    }
+    Ok(())
+}
+
+fn create_judge_draft(root: &Path) -> Result<(), AgentWorkflowError> {
+    for dir in ["alignment", "findings", "side_effect_dispositions"] {
+        fs::create_dir_all(root.join(dir)).map_err(|source| workspace_error(root, source))?;
+    }
+    Ok(())
+}
+
+#[allow(clippy::too_many_lines)]
+fn read_judge_filesystem(
+    root: &Path,
+    echoed: &EchoedSpec,
+) -> Result<JudgeDraft, AgentWorkflowError> {
+    let submitted = root.join("submitted");
+    require_marker(&submitted)?;
+    reject_unexpected_entries(
+        root,
+        &[
+            "alignment",
+            "confidence",
+            "model",
+            "model_selection",
+            "findings",
+            "side_effect_dispositions",
+            "submitted",
+        ],
+    )?;
+    let align_dir = root.join("alignment");
+    if !is_real_dir(&align_dir) {
+        return Err(AgentWorkflowError::InvalidState(
+            "missing alignment directory".to_owned(),
+        ));
+    }
+    let markers = fs::read_dir(&align_dir)
+        .map_err(|source| workspace_error(&align_dir, source))?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|source| workspace_error(&align_dir, source))?;
+    if markers.len() != 1 {
+        return Err(AgentWorkflowError::InvalidState(
+            "judge alignment must have one marker".to_owned(),
+        ));
+    }
+    if !is_real_dir(&markers[0].path()) {
+        return Err(AgentWorkflowError::InvalidState(
+            "alignment marker must be a directory".to_owned(),
+        ));
+    }
+    let alignment = match markers[0].file_name().to_string_lossy().as_ref() {
+        "SAME" => Alignment::Same,
+        "PARTIAL" => Alignment::Partial,
+        "DIFFERENT" => Alignment::Different,
+        "UNCERTAIN" => Alignment::Uncertain,
+        _ => {
+            return Err(AgentWorkflowError::InvalidState(
+                "invalid judge alignment".to_owned(),
+            ));
+        }
+    };
+    reject_unexpected_entries(&align_dir, &["SAME", "PARTIAL", "DIFFERENT", "UNCERTAIN"])?;
+    let confidence = read_confidence(&root.join("confidence"))?;
+    let model = read_required_text(&root.join("model"))?;
+    let model_selection = read_model_selection(&root.join("model_selection"))?;
+    let findings_dir = root.join("findings");
+    let mut findings = Vec::new();
+    let mut entries = fs::read_dir(&findings_dir)
+        .map_err(|source| workspace_error(&findings_dir, source))?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|source| workspace_error(&findings_dir, source))?;
+    entries.sort_by_key(std::fs::DirEntry::file_name);
+    for (index, entry) in entries.into_iter().enumerate() {
+        if entry.file_name().to_string_lossy() != format!("{index:06}")
+            || !is_real_dir(&entry.path())
+        {
+            return Err(AgentWorkflowError::InvalidState(
+                "invalid finding entry".to_owned(),
+            ));
+        }
+        let dir = entry.path();
+        let kind_dirs = fs::read_dir(&dir)
+            .map_err(|source| workspace_error(&dir, source))?
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|source| workspace_error(&dir, source))?
+            .into_iter()
+            .filter(|entry| is_real_dir(&entry.path()))
+            .collect::<Vec<_>>();
+        if kind_dirs.len() != 1 {
+            return Err(AgentWorkflowError::InvalidState(
+                "finding must have one kind marker".to_owned(),
+            ));
+        }
+        let kind = match kind_dirs[0].file_name().to_string_lossy().as_ref() {
+            "missing_requirement" => FindingCategory::MissingRequirements,
+            "unrequested_change" => FindingCategory::UnrequestedChanges,
+            "violated_constraint" => FindingCategory::ViolatedConstraints,
+            "potential_side_effect" => FindingCategory::PotentialSideEffects,
+            _ => {
+                return Err(AgentWorkflowError::InvalidState(
+                    "invalid finding kind".to_owned(),
+                ));
+            }
+        };
+        let text = read_required_text(&dir.join("text"))?;
+        let evidence_path = dir.join("evidence_ref");
+        let evidence_ref = if evidence_path.exists() {
+            Some(read_required_text(&evidence_path)?)
+        } else {
+            None
+        };
+        reject_unexpected_entries(
+            &dir,
+            &[
+                "missing_requirement",
+                "unrequested_change",
+                "violated_constraint",
+                "potential_side_effect",
+                "text",
+                "evidence_ref",
+            ],
+        )?;
+        findings.push(JudgeFinding {
+            kind,
+            text,
+            evidence_ref,
+        });
+    }
+    let mut side_effect_dispositions = Vec::new();
+    for index in 0..echoed.side_effects.len() {
+        let candidate = root
+            .join("side_effect_dispositions")
+            .join(format!("side_effect/{index}"));
+        if !is_real_dir(&candidate) {
+            return Err(AgentWorkflowError::InvalidState(format!(
+                "missing disposition side_effect/{index}"
+            )));
+        }
+        let branches = fs::read_dir(&candidate)
+            .map_err(|source| workspace_error(&candidate, source))?
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|source| workspace_error(&candidate, source))?;
+        if branches.len() != 1 || !is_real_dir(&branches[0].path()) {
+            return Err(AgentWorkflowError::InvalidState(
+                "invalid side effect disposition".to_owned(),
+            ));
+        }
+        let branch = branches[0].file_name().to_string_lossy().to_string();
+        if branch == "finding" {
+            let text = read_required_text(&candidate.join("finding/text"))?;
+            let evidence = read_required_text(&candidate.join("finding/evidence_ref"))?;
+            reject_unexpected_entries(&candidate.join("finding"), &["text", "evidence_ref"])?;
+            let finding_index = findings.len();
+            findings.push(JudgeFinding {
+                kind: FindingCategory::PotentialSideEffects,
+                text,
+                evidence_ref: Some(evidence),
+            });
+            side_effect_dispositions.push(SideEffectDisposition {
+                candidate: format!("side_effect/{index}"),
+                side_effect_index: index,
+                kind: SideEffectDispositionKind::Finding { finding_index },
+            });
+        } else if branch == "not-distinct" {
+            let reason = read_required_text(&candidate.join("not-distinct/reason"))?;
+            reject_unexpected_entries(&candidate.join("not-distinct"), &["reason"])?;
+            side_effect_dispositions.push(SideEffectDisposition {
+                candidate: format!("side_effect/{index}"),
+                side_effect_index: index,
+                kind: SideEffectDispositionKind::NotDistinct { reason },
+            });
+        } else {
+            return Err(AgentWorkflowError::InvalidState(
+                "invalid side effect disposition branch".to_owned(),
+            ));
+        }
+    }
+    let disposition_root = root.join("side_effect_dispositions");
+    if !is_real_dir(&disposition_root) {
+        return Err(AgentWorkflowError::InvalidState(
+            "missing side effect disposition directory".to_owned(),
+        ));
+    }
+    let side_effect_root = disposition_root.join("side_effect");
+    if echoed.side_effects.is_empty() {
+        if side_effect_root.exists() {
+            return Err(AgentWorkflowError::InvalidState(
+                "unexpected side effect disposition entries".to_owned(),
+            ));
+        }
+        return Ok(JudgeDraft {
+            alignment: Some(alignment),
+            confidence: Some(confidence),
+            findings,
+            side_effect_dispositions,
+            model: Some(model),
+            model_selection,
+        });
+    }
+    if !is_real_dir(&side_effect_root) {
+        return Err(AgentWorkflowError::InvalidState(
+            "missing side effect disposition entries".to_owned(),
+        ));
+    }
+    let disposition_entries = fs::read_dir(&side_effect_root)
+        .map_err(|source| workspace_error(&side_effect_root, source))?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|source| workspace_error(&side_effect_root, source))?;
+    if disposition_entries.len() != echoed.side_effects.len() {
+        return Err(AgentWorkflowError::InvalidState(
+            "unexpected side effect disposition".to_owned(),
+        ));
+    }
+    reject_unexpected_entries(&disposition_root, &["side_effect"])?;
+    Ok(JudgeDraft {
+        alignment: Some(alignment),
+        confidence: Some(confidence),
+        findings,
+        side_effect_dispositions,
+        model: Some(model),
+        model_selection,
+    })
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -585,12 +1588,110 @@ struct ReconciliationState {
     bundle: BlindBundle,
     blind_model: Option<String>,
     blind_model_selection: flect_core::AgentModelSelection,
+    draft: Option<JudgeDraft>,
+}
+
+#[derive(Clone, Serialize, Deserialize)]
+struct JudgeDraft {
+    alignment: Option<Alignment>,
+    confidence: Option<f64>,
+    findings: Vec<JudgeFinding>,
+    side_effect_dispositions: Vec<SideEffectDisposition>,
+    model: Option<String>,
+    model_selection: AgentModelSelection,
+}
+
+#[derive(Clone, Serialize, Deserialize)]
+struct SideEffectDisposition {
+    candidate: String,
+    side_effect_index: usize,
+    kind: SideEffectDispositionKind,
+}
+
+#[derive(Clone, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case", tag = "kind")]
+enum SideEffectDispositionKind {
+    Finding { finding_index: usize },
+    NotDistinct { reason: String },
+}
+
+fn side_effect_candidate_index(
+    echoed_spec: &EchoedSpec,
+    candidate: &str,
+) -> Result<usize, AgentWorkflowError> {
+    let Some(index) = candidate
+        .strip_prefix("side_effect/")
+        .and_then(|value| value.parse::<usize>().ok())
+    else {
+        return Err(AgentWorkflowError::InvalidState(format!(
+            "invalid side effect candidate `{candidate}`"
+        )));
+    };
+    if echoed_spec.side_effects.get(index).is_none() {
+        return Err(AgentWorkflowError::InvalidState(format!(
+            "unavailable side effect candidate `{candidate}`"
+        )));
+    }
+    Ok(index)
+}
+
+fn validate_side_effect_dispositions(
+    draft: &JudgeDraft,
+    echoed_spec: &EchoedSpec,
+) -> Result<(), AgentWorkflowError> {
+    for index in 0..echoed_spec.side_effects.len() {
+        let candidate = format!("side_effect/{index}");
+        let disposition = draft
+            .side_effect_dispositions
+            .iter()
+            .find(|disposition| disposition.candidate == candidate)
+            .ok_or_else(|| {
+                AgentWorkflowError::InvalidState(format!(
+                    "verifier side effect candidate `{candidate}` has no disposition"
+                ))
+            })?;
+        if disposition.side_effect_index != index {
+            return Err(AgentWorkflowError::InvalidState(format!(
+                "side effect candidate `{candidate}` has an invalid disposition"
+            )));
+        }
+        if let SideEffectDispositionKind::Finding { finding_index } = disposition.kind {
+            let finding = draft.findings.get(finding_index).ok_or_else(|| {
+                AgentWorkflowError::InvalidState(format!(
+                    "side effect candidate `{candidate}` has no linked finding"
+                ))
+            })?;
+            if finding.kind != FindingCategory::PotentialSideEffects
+                || finding.evidence_ref.as_deref().is_none_or(str::is_empty)
+            {
+                return Err(AgentWorkflowError::InvalidState(format!(
+                    "side effect candidate `{candidate}` requires a potential side effect finding with evidence"
+                )));
+            }
+        }
+    }
+    Ok(())
+}
+
+fn validate_typed_judge_invariants(verdict: &JudgeVerdict) -> Result<(), AgentWorkflowError> {
+    if verdict.alignment == Alignment::Different
+        && !verdict.findings.iter().any(|finding| {
+            matches!(
+                finding.kind,
+                FindingCategory::MissingRequirements | FindingCategory::UnrequestedChanges
+            )
+        })
+    {
+        return Err(AgentWorkflowError::DifferentWithoutObjectiveMismatch);
+    }
+    Ok(())
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 enum ReconciliationStatus {
     Prepared,
+    Collecting,
     Completed,
     Failed,
     Abandoned,

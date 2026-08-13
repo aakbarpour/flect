@@ -8,6 +8,7 @@ use serde_json::{Value, json};
 const SENTINEL: &str = "SECRET_ORIGINAL_TASK_MCP_SENTINEL";
 
 #[test]
+#[allow(clippy::too_many_lines)]
 fn stdio_session_discovers_tools_and_persists_strict_blind_results() {
     let repository = tempfile::tempdir().unwrap();
     git(repository.path(), ["init", "-b", "main"]);
@@ -65,7 +66,11 @@ fn stdio_session_discovers_tools_and_persists_strict_blind_results() {
             "flect_prepare_blind",
             "flect_submit_echo",
             "flect_prepare_reconciliation",
-            "flect_submit_verdict",
+            "flect_judge_begin",
+            "flect_judge_set_alignment",
+            "flect_judge_add_finding",
+            "flect_judge_set_confidence",
+            "flect_judge_submit",
             "flect_get_result"
         ]
     );
@@ -222,20 +227,37 @@ fn exercise_agent_handoff(client: &mut McpClient) -> Value {
         .as_str()
         .unwrap();
     assert_ne!(judge_job_id, blind_job_id);
-
-    let judged = client.call(
-        11,
-        "flect_submit_verdict",
-        &json!({
-            "job_id": judge_job_id,
-            "verdict": {
-                "alignment": "UNCERTAIN", "findings": [],
-                "confidence": 0.4
-            },
-            "model": "test-judge", "model_selection": "explicit"
-        }),
+    assert!(
+        judge["result"]["structuredContent"]
+            .get("submission_file")
+            .is_none()
     );
-    assert_eq!(judged["result"]["isError"], false);
+    assert_eq!(
+        client.call(
+            11,
+            "flect_judge_begin",
+            &json!({"job_id": judge_job_id, "model": "test-judge", "model_selection": "explicit"})
+        )["result"]["isError"],
+        false
+    );
+    assert_eq!(
+        client.call(
+            12,
+            "flect_judge_set_alignment",
+            &json!({"job_id": judge_job_id, "alignment": "UNCERTAIN"})
+        )["result"]["isError"],
+        false
+    );
+    assert_eq!(
+        client.call(
+            13,
+            "flect_judge_set_confidence",
+            &json!({"job_id": judge_job_id, "confidence": 0.4})
+        )["result"]["isError"],
+        false
+    );
+    let judged = client.call(14, "flect_judge_submit", &json!({"job_id": judge_job_id}));
+    assert_eq!(judged["result"]["isError"], false, "{judged}");
     assert_eq!(
         judged["result"]["structuredContent"]["model_calls"][0]["provider"],
         "codex-native"

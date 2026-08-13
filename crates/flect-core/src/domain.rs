@@ -423,7 +423,7 @@ pub enum AgentModelSelection {
 }
 
 /// Trusted handoff prepared for a blind external reasoner.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct BlindAgentJob {
     pub version: u32,
@@ -439,7 +439,7 @@ pub struct BlindAgentJob {
 }
 
 /// Typed response submitted by a blind reasoner.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct BlindAgentSubmission {
     pub job_id: String,
@@ -457,17 +457,21 @@ pub struct ReconciliationAgentJob {
     pub job_id: String,
     pub run_id: String,
     pub blind_job_id: String,
+    /// Sanitized Flect-owned workspace containing only reconciliation inputs.
+    pub workspace: String,
     pub instructions: String,
+    /// The only files a fresh reconciliation reasoner may read in `workspace`.
+    pub allowed_resources: Vec<String>,
     pub intended_spec: IntendedSpec,
     pub echoed_spec: EchoedSpec,
-    pub available_evidence: Vec<ChangedFile>,
-    /// Machine-readable, fail-closed rules and permitted patch locations for evidence.
-    pub evidence_contract: serde_json::Value,
-    pub verdict_schema: serde_json::Value,
+    /// Machine-readable, fail-closed stable patch references for judge findings.
+    ///
+    /// This is reference material for Flect's typed judge command lifecycle.
+    pub evidence_ref_contract: serde_json::Value,
 }
 
 /// Typed response submitted by a reconciliation reasoner.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct ReconciliationAgentSubmission {
     pub job_id: String,

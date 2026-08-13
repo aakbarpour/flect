@@ -77,8 +77,8 @@ fn doctor_reports_api_credential_readiness_without_exposing_values() {
     let config = fs::read_to_string(&config_path)
         .unwrap()
         .replace(
-            "kind = \"mock\"",
-            "kind = \"api\"\nmodel = \"custom-model\"",
+            "kind = \"mock\"\nprotocol = \"responses\"\nbase_url = \"https://api.openai.com/v1\"\napi_key_env = \"OPENAI_API_KEY\"\nmodel = \"gpt-5.6-luna\"",
+            "kind = \"api\"\nprotocol = \"responses\"\nbase_url = \"https://api.openai.com/v1\"\napi_key_env = \"OPENAI_API_KEY\"\nmodel = \"custom-model\"",
         )
         .replace("OPENAI_API_KEY", "FLECT_DOCTOR_TEST_KEY");
     fs::write(config_path, config).unwrap();
@@ -144,6 +144,225 @@ fn config_commands_set_and_show_validated_runner_values() {
         ["config", "set", "runner.confidence_threshold", "2"],
     );
     assert!(!invalid.status.success());
+}
+
+#[test]
+#[allow(clippy::too_many_lines)]
+fn direct_judge_submission_is_strict_and_does_not_use_chat_text() {
+    let repository = tempfile::tempdir().unwrap();
+    git(repository.path(), ["init", "-b", "main"]);
+    git(
+        repository.path(),
+        ["config", "user.email", "tests@flect.local"],
+    );
+    git(repository.path(), ["config", "user.name", "Flect Tests"]);
+    fs::write(repository.path().join("app.txt"), "old\n").unwrap();
+    git(repository.path(), ["add", "app.txt"]);
+    git(repository.path(), ["commit", "-m", "base"]);
+    assert_success(flect(repository.path(), ["init"]));
+    git(repository.path(), ["add", ".gitignore", "flect.toml"]);
+    git(repository.path(), ["commit", "-m", "configure flect"]);
+    assert_success(flect(
+        repository.path(),
+        ["start", "--task", "Change app behavior"],
+    ));
+    fs::write(repository.path().join("app.txt"), "new\n").unwrap();
+
+    let blind = flect(repository.path(), ["--json", "agent", "prepare-blind"]);
+    assert_success(&blind);
+    let blind: serde_json::Value = serde_json::from_slice(&blind.stdout).unwrap();
+    let blind_job_id = blind["job_id"].as_str().unwrap();
+    let text = tempfile::tempdir().unwrap();
+    let objective = text.path().join("objective.txt");
+    let after = text.path().join("after.txt");
+    let side_effect = text.path().join("side-effect.txt");
+    let side_effect_reason = text.path().join("side-effect-reason.txt");
+    fs::write(&objective, "Change app behavior").unwrap();
+    fs::write(&after, "New behavior").unwrap();
+    fs::write(&side_effect, "Callers observe new behavior").unwrap();
+    fs::write(&side_effect_reason, "This restates the changed behavior.").unwrap();
+    assert_success(flect(
+        repository.path(),
+        [
+            "--json",
+            "agent",
+            "verifier-begin",
+            "--job",
+            blind_job_id,
+            "--model",
+            "gpt-5.6-terra",
+            "--model-selection",
+            "explicit",
+        ],
+    ));
+    assert_success(
+        Command::new(env!("CARGO_BIN_EXE_flect"))
+            .current_dir(repository.path())
+            .args([
+                "--json",
+                "agent",
+                "verifier-add-side-effect",
+                "--job",
+                blind_job_id,
+                "--text-file",
+            ])
+            .arg(&side_effect)
+            .output()
+            .unwrap(),
+    );
+    assert_success(
+        Command::new(env!("CARGO_BIN_EXE_flect"))
+            .current_dir(repository.path())
+            .args([
+                "--json",
+                "agent",
+                "verifier-set-objective",
+                "--job",
+                blind_job_id,
+                "--text-file",
+            ])
+            .arg(&objective)
+            .output()
+            .unwrap(),
+    );
+    assert_success(
+        Command::new(env!("CARGO_BIN_EXE_flect"))
+            .current_dir(repository.path())
+            .args([
+                "--json",
+                "agent",
+                "verifier-add-after",
+                "--job",
+                blind_job_id,
+                "--text-file",
+            ])
+            .arg(&after)
+            .output()
+            .unwrap(),
+    );
+    assert_success(flect(
+        repository.path(),
+        [
+            "--json",
+            "agent",
+            "verifier-add-scope",
+            "--job",
+            blind_job_id,
+            "--file",
+            "app.txt",
+        ],
+    ));
+    assert_success(flect(
+        repository.path(),
+        [
+            "--json",
+            "agent",
+            "verifier-set-confidence",
+            "--job",
+            blind_job_id,
+            "0.9",
+        ],
+    ));
+    assert_success(flect(
+        repository.path(),
+        ["--json", "agent", "verifier-submit", "--job", blind_job_id],
+    ));
+    assert_success(flect(
+        repository.path(),
+        ["--json", "agent", "verifier-commit", "--job", blind_job_id],
+    ));
+    let judge = Command::new(env!("CARGO_BIN_EXE_flect"))
+        .current_dir(repository.path())
+        .args([
+            "--json",
+            "agent",
+            "prepare-reconciliation",
+            "--blind-job",
+            blind_job_id,
+        ])
+        .output()
+        .unwrap();
+    assert_success(&judge);
+    let judge: serde_json::Value = serde_json::from_slice(&judge.stdout).unwrap();
+    let judge_job_id = judge["job_id"].as_str().unwrap();
+    assert!(judge.get("submission_file").is_none());
+    assert_success(flect(
+        repository.path(),
+        [
+            "--json",
+            "agent",
+            "judge-begin",
+            "--job",
+            judge_job_id,
+            "--model",
+            "gpt-5.6-terra",
+            "--model-selection",
+            "explicit",
+        ],
+    ));
+    let invalid_kind = flect(
+        repository.path(),
+        [
+            "--json",
+            "agent",
+            "judge-add-finding",
+            "--job",
+            judge_job_id,
+            "--kind",
+            "structural",
+            "--text-file",
+            "missing.txt",
+        ],
+    );
+    assert!(!invalid_kind.status.success());
+    assert_success(
+        Command::new(env!("CARGO_BIN_EXE_flect"))
+            .current_dir(repository.path())
+            .args([
+                "--json",
+                "agent",
+                "judge-mark-side-effect-not-distinct",
+                "--job",
+                judge_job_id,
+                "--candidate",
+                "side_effect/0",
+                "--reason-file",
+            ])
+            .arg(&side_effect_reason)
+            .output()
+            .unwrap(),
+    );
+    assert_success(flect(
+        repository.path(),
+        [
+            "--json",
+            "agent",
+            "judge-set-alignment",
+            "--job",
+            judge_job_id,
+            "same",
+        ],
+    ));
+    assert_success(flect(
+        repository.path(),
+        [
+            "--json",
+            "agent",
+            "judge-set-confidence",
+            "--job",
+            judge_job_id,
+            "0.9",
+        ],
+    ));
+    assert_success(flect(
+        repository.path(),
+        ["--json", "agent", "judge-submit", "--job", judge_job_id],
+    ));
+    let reused = flect(
+        repository.path(),
+        ["--json", "agent", "judge-submit", "--job", judge_job_id],
+    );
+    assert!(!reused.status.success());
 }
 
 fn flect<const N: usize>(directory: &Path, arguments: [&str; N]) -> Output {

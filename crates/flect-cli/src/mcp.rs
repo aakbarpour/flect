@@ -7,15 +7,15 @@ use std::process::Command;
 
 use flect_app::AgentService;
 use flect_core::{
-    BlindAgentSubmission, ContextPolicy, EchoedSpec, GitRepository, JudgeVerdict,
-    ReconciliationAgentSubmission, RunStore,
+    AgentModelSelection, Alignment, BlindAgentSubmission, ContextPolicy, EchoedSpec,
+    FindingCategory, GitRepository, RunStore,
 };
 use miette::{IntoDiagnostic, Result, WrapErr};
 use schemars::schema_for;
 use serde_json::{Map, Value, json};
 
 const PROTOCOL_VERSION: &str = "2025-11-25";
-const INSTRUCTIONS: &str = "Use flect_start before implementation. For Codex-native verification, call flect_prepare_blind, hand only its allowed resources to a fresh no-parent-context verifier, submit its EchoedSpec with flect_submit_echo, prepare a separate judge with flect_prepare_reconciliation, and submit its Verdict with flect_submit_verdict. Alternatively, flect_verify retains the configured automated API workflow. Use flect_get_result to retrieve the persisted verdict.";
+const INSTRUCTIONS: &str = "Use flect_start before implementation. For Codex-native verification, prepare a blind job, submit its EchoedSpec, and prepare a separate judge. The fresh judge itself uses flect_judge_begin, flect_judge_set_alignment, zero or more flect_judge_add_finding, flect_judge_set_confidence, and flect_judge_submit. Never parse judge chat or accept judge-authored JSON; Flect owns the submission envelope, serialization, evidence validation, lifecycle, and persistence. Alternatively, flect_verify retains the configured automated API workflow.";
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 enum Lifecycle {
@@ -193,7 +193,11 @@ fn call_tool(
         "flect_prepare_blind" => prepare_blind(arguments, working_directory),
         "flect_submit_echo" => submit_echo(arguments, working_directory),
         "flect_prepare_reconciliation" => prepare_reconciliation(arguments, working_directory),
-        "flect_submit_verdict" => submit_verdict(arguments, working_directory),
+        "flect_judge_begin" => judge_begin(arguments, working_directory),
+        "flect_judge_set_alignment" => judge_set_alignment(arguments, working_directory),
+        "flect_judge_add_finding" => judge_add_finding(arguments, working_directory),
+        "flect_judge_set_confidence" => judge_set_confidence(arguments, working_directory),
+        "flect_judge_submit" => judge_submit(arguments, working_directory),
         "flect_get_result" => get_result(arguments, working_directory),
         _ => return Err(format!("unknown Flect tool `{name}`")),
     };
@@ -247,15 +251,34 @@ fn validate_arguments(
             reject_unknown(arguments, &["blind_job_id"])?;
             required_string(arguments, "blind_job_id")?;
         }
-        "flect_submit_verdict" => {
-            reject_unknown(
-                arguments,
-                &["job_id", "verdict", "model", "model_selection"],
-            )?;
+        "flect_judge_begin" => {
+            reject_unknown(arguments, &["job_id", "model", "model_selection"])?;
             required_string(arguments, "job_id")?;
-            required_object(arguments, "verdict")?;
             optional_string(arguments, "model")?;
             model_selection(arguments)?;
+        }
+        "flect_judge_set_alignment" => {
+            reject_unknown(arguments, &["job_id", "alignment"])?;
+            required_string(arguments, "job_id")?;
+            required_string(arguments, "alignment")?;
+        }
+        "flect_judge_add_finding" => {
+            reject_unknown(arguments, &["job_id", "kind", "text", "evidence_ref"])?;
+            required_string(arguments, "job_id")?;
+            required_string(arguments, "kind")?;
+            required_string(arguments, "text")?;
+            optional_string(arguments, "evidence_ref")?;
+        }
+        "flect_judge_set_confidence" => {
+            reject_unknown(arguments, &["job_id", "confidence"])?;
+            required_string(arguments, "job_id")?;
+            if !arguments.get("confidence").is_some_and(Value::is_number) {
+                return Err("confidence must be a number".to_owned());
+            }
+        }
+        "flect_judge_submit" => {
+            reject_unknown(arguments, &["job_id"])?;
+            required_string(arguments, "job_id")?;
         }
         "flect_get_result" => {
             reject_unknown(arguments, &["run"])?;
@@ -396,18 +419,114 @@ fn prepare_reconciliation(
     serde_json::to_value(job).map_err(|error| error.to_string())
 }
 
-fn submit_verdict(
+fn judge_begin(
     arguments: &Map<String, Value>,
     working_directory: &Path,
 ) -> std::result::Result<Value, String> {
-    let submission =
-        serde_json::from_value::<ReconciliationAgentSubmission>(Value::Object(arguments.clone()))
-            .map_err(|error| format!("invalid reconciliation submission: {error}"))?;
+    let job_id = required_string(arguments, "job_id")?;
     let service = AgentService::discover(working_directory).map_err(|error| error.to_string())?;
-    let record = service
-        .submit_verdict(submission)
+    service
+        .judge_begin(
+            &job_id,
+            arguments
+                .get("model")
+                .and_then(Value::as_str)
+                .map(str::to_owned),
+            parse_model_selection(arguments)?,
+        )
+        .map_err(|error| error.to_string())?;
+    Ok(json!({"job_id": job_id, "status": "collecting"}))
+}
+
+fn judge_set_alignment(
+    arguments: &Map<String, Value>,
+    working_directory: &Path,
+) -> std::result::Result<Value, String> {
+    let job_id = required_string(arguments, "job_id")?;
+    let alignment = parse_alignment(&required_string(arguments, "alignment")?)?;
+    AgentService::discover(working_directory)
+        .map_err(|error| error.to_string())?
+        .judge_set_alignment(&job_id, alignment)
+        .map_err(|error| error.to_string())?;
+    Ok(json!({"job_id": job_id, "status": "collecting"}))
+}
+
+fn judge_add_finding(
+    arguments: &Map<String, Value>,
+    working_directory: &Path,
+) -> std::result::Result<Value, String> {
+    let job_id = required_string(arguments, "job_id")?;
+    let kind = parse_finding_kind(&required_string(arguments, "kind")?)?;
+    let text = required_string(arguments, "text")?;
+    let evidence_ref = arguments
+        .get("evidence_ref")
+        .and_then(Value::as_str)
+        .map(str::to_owned);
+    AgentService::discover(working_directory)
+        .map_err(|error| error.to_string())?
+        .judge_add_finding(&job_id, kind, text, evidence_ref)
+        .map_err(|error| error.to_string())?;
+    Ok(json!({"job_id": job_id, "status": "collecting"}))
+}
+
+fn judge_set_confidence(
+    arguments: &Map<String, Value>,
+    working_directory: &Path,
+) -> std::result::Result<Value, String> {
+    let job_id = required_string(arguments, "job_id")?;
+    let confidence = arguments["confidence"]
+        .as_f64()
+        .ok_or_else(|| "confidence must be a number".to_owned())?;
+    AgentService::discover(working_directory)
+        .map_err(|error| error.to_string())?
+        .judge_set_confidence(&job_id, confidence)
+        .map_err(|error| error.to_string())?;
+    Ok(json!({"job_id": job_id, "status": "collecting"}))
+}
+
+fn judge_submit(
+    arguments: &Map<String, Value>,
+    working_directory: &Path,
+) -> std::result::Result<Value, String> {
+    let job_id = required_string(arguments, "job_id")?;
+    let record = AgentService::discover(working_directory)
+        .map_err(|error| error.to_string())?
+        .judge_submit(&job_id)
         .map_err(|error| error.to_string())?;
     serde_json::to_value(record).map_err(|error| error.to_string())
+}
+
+fn parse_alignment(value: &str) -> std::result::Result<Alignment, String> {
+    match value {
+        "SAME" => Ok(Alignment::Same),
+        "PARTIAL" => Ok(Alignment::Partial),
+        "DIFFERENT" => Ok(Alignment::Different),
+        "UNCERTAIN" => Ok(Alignment::Uncertain),
+        _ => Err("alignment must be SAME, PARTIAL, DIFFERENT, or UNCERTAIN".to_owned()),
+    }
+}
+fn parse_finding_kind(value: &str) -> std::result::Result<FindingCategory, String> {
+    match value {
+        "missing_requirement" => Ok(FindingCategory::MissingRequirements),
+        "unrequested_change" => Ok(FindingCategory::UnrequestedChanges),
+        "violated_constraint" => Ok(FindingCategory::ViolatedConstraints),
+        "potential_side_effect" => Ok(FindingCategory::PotentialSideEffects),
+        _ => Err("unknown finding kind".to_owned()),
+    }
+}
+fn parse_model_selection(
+    arguments: &Map<String, Value>,
+) -> std::result::Result<AgentModelSelection, String> {
+    match arguments
+        .get("model_selection")
+        .and_then(Value::as_str)
+        .unwrap_or("unknown")
+    {
+        "explicit" => Ok(AgentModelSelection::Explicit),
+        "inherited" => Ok(AgentModelSelection::Inherited),
+        "unknown" => Ok(AgentModelSelection::Unknown),
+        _ => Err("model_selection must be explicit, inherited, or unknown".to_owned()),
+    }
 }
 
 fn run_cli(
@@ -545,6 +664,7 @@ fn truncate(value: &str, maximum: usize) -> String {
     value.chars().take(maximum).collect::<String>() + "…"
 }
 
+#[allow(clippy::too_many_lines)]
 fn tools() -> Vec<Value> {
     vec![
         tool(
@@ -608,9 +728,33 @@ fn tools() -> Vec<Value> {
             false,
         ),
         tool(
-            "flect_submit_verdict",
-            "Validate a judge Verdict against available evidence and persist the final result.",
-            agent_submission_schema("verdict", json!(schema_for!(JudgeVerdict))),
+            "flect_judge_begin",
+            "Begin Flect-owned typed semantic judge submission.",
+            json!({"type":"object","properties":{"job_id":{"type":"string","minLength":1},"model":{"type":"string"},"model_selection":{"enum":["explicit","inherited","unknown"]}},"required":["job_id"],"additionalProperties":false}),
+            false,
+        ),
+        tool(
+            "flect_judge_set_alignment",
+            "Set the typed judge alignment.",
+            json!({"type":"object","properties":{"job_id":{"type":"string","minLength":1},"alignment":{"enum":["SAME","PARTIAL","DIFFERENT","UNCERTAIN"]}},"required":["job_id","alignment"],"additionalProperties":false}),
+            false,
+        ),
+        tool(
+            "flect_judge_add_finding",
+            "Add one typed semantic finding; Flect owns serialization.",
+            json!({"type":"object","properties":{"job_id":{"type":"string","minLength":1},"kind":{"enum":["missing_requirement","unrequested_change","violated_constraint","potential_side_effect"]},"text":{"type":"string","minLength":1},"evidence_ref":{"type":"string"}},"required":["job_id","kind","text"],"additionalProperties":false}),
+            false,
+        ),
+        tool(
+            "flect_judge_set_confidence",
+            "Set typed judge confidence.",
+            json!({"type":"object","properties":{"job_id":{"type":"string","minLength":1},"confidence":{"type":"number","minimum":0,"maximum":1}},"required":["job_id","confidence"],"additionalProperties":false}),
+            false,
+        ),
+        tool(
+            "flect_judge_submit",
+            "Validate and persist the Flect-owned typed judge submission.",
+            json!({"type":"object","properties":{"job_id":{"type":"string","minLength":1}},"required":["job_id"],"additionalProperties":false}),
             false,
         ),
         tool(
@@ -707,7 +851,11 @@ mod tests {
                 "flect_prepare_blind",
                 "flect_submit_echo",
                 "flect_prepare_reconciliation",
-                "flect_submit_verdict",
+                "flect_judge_begin",
+                "flect_judge_set_alignment",
+                "flect_judge_add_finding",
+                "flect_judge_set_confidence",
+                "flect_judge_submit",
                 "flect_get_result"
             ]
         );
@@ -781,7 +929,7 @@ mod tests {
     }
 
     #[test]
-    fn agent_submission_schemas_include_typed_payloads() {
+    fn agent_submission_schemas_keep_echo_and_judge_commands_typed() {
         let tools = tools();
         let echo = tools
             .iter()
@@ -791,13 +939,19 @@ mod tests {
             echo["inputSchema"]["properties"]["echoed_spec"]["additionalProperties"],
             false
         );
-        let verdict = tools
+        let finding = tools
             .iter()
-            .find(|tool| tool["name"] == "flect_submit_verdict")
+            .find(|tool| tool["name"] == "flect_judge_add_finding")
             .unwrap();
         assert_eq!(
-            verdict["inputSchema"]["properties"]["verdict"]["additionalProperties"],
-            false
+            finding["inputSchema"]["properties"]["kind"]["enum"],
+            json!([
+                "missing_requirement",
+                "unrequested_change",
+                "violated_constraint",
+                "potential_side_effect"
+            ])
         );
+        assert!(finding["inputSchema"]["properties"]["verdict"].is_null());
     }
 }

@@ -64,6 +64,36 @@ jobs:
         if: runner.os == 'Windows'
         shell: powershell
         run: powershell -NoProfile -ExecutionPolicy Bypass -File ./tools/package-release.ps1 -Target "${{ matrix.target }}" -Version "$env:RELEASE_VERSION"
+      - name: Smoke-check native executable (Unix)
+        if: runner.os != 'Windows' && !startsWith(matrix.target, 'aarch64-unknown-linux')
+        shell: bash
+        run: target/${{ matrix.target }}/release/flect --version
+      - name: Smoke-check native executable (Windows)
+        if: runner.os == 'Windows'
+        shell: powershell
+        run: .\target\${{ matrix.target }}\release\flect.exe --version
+      - name: Validate Unix archive contents
+        if: runner.os != 'Windows'
+        shell: bash
+        run: |
+          archive="dist/flect-${RELEASE_VERSION}-${{ matrix.target }}.tar.gz"
+          test -f "$archive"
+          listing="$(tar -tzf "$archive")"
+          for expected in flect LICENSE README.md; do
+            printf '%s\n' "$listing" | grep -Fx "flect-${RELEASE_VERSION}-${{ matrix.target }}/$expected"
+          done
+      - name: Validate Windows archive contents
+        if: runner.os == 'Windows'
+        shell: powershell
+        run: |
+          $archive = "dist/flect-$env:RELEASE_VERSION-${{ matrix.target }}.zip"
+          if (-not (Test-Path -LiteralPath $archive)) { throw "missing $archive" }
+          Add-Type -AssemblyName System.IO.Compression.FileSystem
+          $entries = [IO.Compression.ZipFile]::OpenRead($archive).Entries.FullName
+          foreach ($expected in @("flect.exe", "LICENSE", "README.md")) {
+            $name = "flect-$env:RELEASE_VERSION-${{ matrix.target }}/$expected"
+            if ($entries -notcontains $name) { throw "archive missing $name" }
+          }
       - uses: actions/upload-artifact@v4
         with:
           name: flect-${{ matrix.target }}
@@ -81,9 +111,15 @@ jobs:
         with:
           path: dist
           merge-multiple: true
-      - name: Generate SHA256SUMS
+      - name: Generate and verify exact SHA256SUMS
         working-directory: dist
-        run: sha256sum flect-* > SHA256SUMS
+        shell: bash
+        run: |
+          mapfile -t artifacts < <(find . -maxdepth 1 -type f \( -name 'flect-*.tar.gz' -o -name 'flect-*.zip' \) -printf '%f\n' | sort)
+          test "${#artifacts[@]}" -eq 5
+          sha256sum "${artifacts[@]}" > SHA256SUMS
+          test "$(wc -l < SHA256SUMS)" -eq "${#artifacts[@]}"
+          sha256sum --check SHA256SUMS
       - uses: actions/upload-artifact@v4
         with:
           name: flect-release

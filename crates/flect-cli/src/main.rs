@@ -8,8 +8,8 @@ mod skill;
 
 use std::path::PathBuf;
 
-use clap::{ArgAction, Parser, Subcommand};
-use flect_core::ContextPolicy;
+use clap::{ArgAction, Parser, Subcommand, ValueEnum};
+use flect_core::{Alignment, ContextPolicy, FindingCategory};
 use miette::Result;
 
 #[derive(Debug, Parser)]
@@ -150,20 +150,144 @@ enum AgentCommand {
         #[arg(long)]
         context: Option<ContextPolicy>,
     },
-    /// Validate and accept a blind verifier submission JSON file.
-    SubmitEcho {
-        #[arg(long, value_name = "PATH")]
-        submission: PathBuf,
+    /// Begin a repository-independent typed verifier submission.
+    VerifierBegin {
+        #[arg(long)]
+        job: String,
+        #[arg(long)]
+        model: Option<String>,
+        #[arg(long, value_enum, default_value_t = ModelSelectionArg::Unknown)]
+        model_selection: ModelSelectionArg,
+    },
+    /// Set the verifier's apparent objective from a UTF-8 text file.
+    VerifierSetObjective {
+        #[arg(long)]
+        job: String,
+        #[arg(long)]
+        text_file: PathBuf,
+    },
+    /// Add one apparent pre-change behavior from a UTF-8 text file.
+    VerifierAddBefore {
+        #[arg(long)]
+        job: String,
+        #[arg(long)]
+        text_file: PathBuf,
+    },
+    /// Add one apparent post-change behavior from a UTF-8 text file.
+    VerifierAddAfter {
+        #[arg(long)]
+        job: String,
+        #[arg(long)]
+        text_file: PathBuf,
+    },
+    /// Add one allowed affected scope without repository access.
+    VerifierAddScope {
+        #[arg(long)]
+        job: String,
+        #[arg(long)]
+        file: String,
+        #[arg(long)]
+        symbol_file: Option<PathBuf>,
+    },
+    /// Add one apparent side effect from a UTF-8 text file.
+    VerifierAddSideEffect {
+        #[arg(long)]
+        job: String,
+        #[arg(long)]
+        text_file: PathBuf,
+    },
+    /// Add one verifier assumption from a UTF-8 text file.
+    VerifierAddAssumption {
+        #[arg(long)]
+        job: String,
+        #[arg(long)]
+        text_file: PathBuf,
+    },
+    /// Add one verifier uncertainty from a UTF-8 text file.
+    VerifierAddUncertainty {
+        #[arg(long)]
+        job: String,
+        #[arg(long)]
+        text_file: PathBuf,
+    },
+    /// Set finite verifier confidence in the inclusive range 0 through 1.
+    VerifierSetConfidence {
+        #[arg(long)]
+        job: String,
+        confidence: f64,
+    },
+    /// Seal a typed verifier submission in external Flect state.
+    VerifierSubmit {
+        #[arg(long)]
+        job: String,
+    },
+    /// Commit a sealed verifier job into repository Flect state; parent passes only the job ID.
+    VerifierCommit {
+        #[arg(long)]
+        job: String,
     },
     /// Prepare a separate judge job after an echo is accepted.
     PrepareReconciliation {
         #[arg(long)]
         blind_job: String,
     },
-    /// Validate, persist, and return a judge submission JSON file.
-    SubmitVerdict {
+    /// Begin a typed judge submission owned by Flect.
+    JudgeBegin {
+        #[arg(long)]
+        job: String,
+        #[arg(long)]
+        model: Option<String>,
+        #[arg(long, value_enum, default_value_t = ModelSelectionArg::Unknown)]
+        model_selection: ModelSelectionArg,
+    },
+    /// Set the semantic alignment for a typed judge submission.
+    JudgeSetAlignment {
+        #[arg(long)]
+        job: String,
+        #[arg(value_enum)]
+        alignment: AlignmentArg,
+    },
+    /// Add one semantic finding. Read text from a file to avoid shell quoting hazards.
+    JudgeAddFinding {
+        #[arg(long)]
+        job: String,
+        #[arg(long, value_enum)]
+        kind: FindingKindArg,
         #[arg(long, value_name = "PATH")]
-        submission: PathBuf,
+        text_file: PathBuf,
+        #[arg(long)]
+        evidence_ref: Option<String>,
+    },
+    /// Disposition one verifier-reported side effect as a distinct finding with evidence.
+    JudgeAddSideEffectFinding {
+        #[arg(long)]
+        job: String,
+        #[arg(long)]
+        candidate: String,
+        #[arg(long, value_name = "PATH")]
+        text_file: PathBuf,
+        #[arg(long)]
+        evidence_ref: String,
+    },
+    /// Record why one verifier-reported side effect is not a distinct finding.
+    JudgeMarkSideEffectNotDistinct {
+        #[arg(long)]
+        job: String,
+        #[arg(long)]
+        candidate: String,
+        #[arg(long, value_name = "PATH")]
+        reason_file: PathBuf,
+    },
+    /// Set the finite confidence in the inclusive range 0 through 1.
+    JudgeSetConfidence {
+        #[arg(long)]
+        job: String,
+        confidence: f64,
+    },
+    /// Validate and persist the Flect-owned typed judge submission.
+    JudgeSubmit {
+        #[arg(long)]
+        job: String,
     },
     /// Delete Flect-owned completed workspaces, or explicitly selected stale jobs.
     Cleanup {
@@ -177,6 +301,58 @@ enum AgentCommand {
         #[arg(long, value_name = "HOURS")]
         older_than: Option<u64>,
     },
+}
+
+#[derive(Clone, Copy, Debug, ValueEnum)]
+enum AlignmentArg {
+    Same,
+    Partial,
+    Different,
+    Uncertain,
+}
+impl From<AlignmentArg> for Alignment {
+    fn from(value: AlignmentArg) -> Self {
+        match value {
+            AlignmentArg::Same => Self::Same,
+            AlignmentArg::Partial => Self::Partial,
+            AlignmentArg::Different => Self::Different,
+            AlignmentArg::Uncertain => Self::Uncertain,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, ValueEnum)]
+enum FindingKindArg {
+    MissingRequirement,
+    UnrequestedChange,
+    ViolatedConstraint,
+    PotentialSideEffect,
+}
+impl From<FindingKindArg> for FindingCategory {
+    fn from(value: FindingKindArg) -> Self {
+        match value {
+            FindingKindArg::MissingRequirement => Self::MissingRequirements,
+            FindingKindArg::UnrequestedChange => Self::UnrequestedChanges,
+            FindingKindArg::ViolatedConstraint => Self::ViolatedConstraints,
+            FindingKindArg::PotentialSideEffect => Self::PotentialSideEffects,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, ValueEnum)]
+enum ModelSelectionArg {
+    Explicit,
+    Inherited,
+    Unknown,
+}
+impl From<ModelSelectionArg> for flect_core::AgentModelSelection {
+    fn from(value: ModelSelectionArg) -> Self {
+        match value {
+            ModelSelectionArg::Explicit => Self::Explicit,
+            ModelSelectionArg::Inherited => Self::Inherited,
+            ModelSelectionArg::Unknown => Self::Unknown,
+        }
+    }
 }
 
 #[tokio::main]

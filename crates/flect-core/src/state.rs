@@ -1,11 +1,15 @@
 //! Versioned, project-local run persistence.
 
 use std::fs;
+use std::io::Write;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use thiserror::Error;
 
 use crate::domain::{RunRecord, VerificationRecord};
+
+static TEMP_SEQUENCE: AtomicU64 = AtomicU64::new(0);
 
 /// Storage rooted at `.flect/` in a project.
 #[derive(Debug, Clone)]
@@ -44,6 +48,8 @@ pub enum StateError {
     VerificationNotFound(String),
     #[error("Flect state uses unsupported version {0}; this release supports version 1")]
     UnsupportedVersion(u32),
+    #[error("invalid Flect run identifier `{0}`")]
+    InvalidRunId(String),
 }
 
 impl RunStore {
@@ -60,6 +66,7 @@ impl RunStore {
     ///
     /// Returns [`StateError`] when state directories or files cannot be written.
     pub fn save_run(&self, run: &RunRecord) -> Result<(), StateError> {
+        validate_run_id(&run.id)?;
         let runs = self.root.join("runs");
         fs::create_dir_all(&runs).map_err(|source| StateError::CreateDirectory {
             path: runs.display().to_string(),
@@ -79,6 +86,7 @@ impl RunStore {
             Some(id) => id.to_owned(),
             None => self.latest_id()?,
         };
+        validate_run_id(&id)?;
         let path = self.root.join("runs").join(format!("{id}.json"));
         if !path.exists() {
             return Err(StateError::RunNotFound(id));
@@ -86,6 +94,9 @@ impl RunStore {
         let run: RunRecord = read_json(&path)?;
         if run.version != 1 {
             return Err(StateError::UnsupportedVersion(run.version));
+        }
+        if run.id != id {
+            return Err(StateError::InvalidRunId(run.id));
         }
         Ok(run)
     }
@@ -96,6 +107,7 @@ impl RunStore {
     ///
     /// Returns [`StateError`] when result serialization or writing fails.
     pub fn save_verification(&self, result: &VerificationRecord) -> Result<(), StateError> {
+        validate_run_id(&result.run_id)?;
         let directory = self.root.join("results");
         fs::create_dir_all(&directory).map_err(|source| StateError::CreateDirectory {
             path: directory.display().to_string(),
@@ -114,6 +126,7 @@ impl RunStore {
             Some(id) => id.to_owned(),
             None => self.latest_id()?,
         };
+        validate_run_id(&id)?;
         let path = self.root.join("results").join(format!("{id}.json"));
         if !path.exists() {
             return Err(StateError::VerificationNotFound(id));
@@ -138,6 +151,7 @@ impl RunStore {
         if id.is_empty() {
             return Err(StateError::NoRuns);
         }
+        validate_run_id(id)?;
         Ok(id.to_owned())
     }
 }
@@ -166,10 +180,57 @@ fn write_text(path: &Path, text: &str) -> Result<(), StateError> {
 }
 
 fn write_bytes(path: &Path, bytes: &[u8]) -> Result<(), StateError> {
-    fs::write(path, bytes).map_err(|source| StateError::Write {
+    let parent = path.parent().ok_or_else(|| StateError::Write {
+        path: path.display().to_string(),
+        source: std::io::Error::other("state path has no parent directory"),
+    })?;
+    let sequence = TEMP_SEQUENCE.fetch_add(1, Ordering::Relaxed);
+    let name = path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or("state");
+    let temporary = parent.join(format!(".{name}.tmp-{}-{sequence}", std::process::id()));
+    let result = (|| {
+        let mut file = fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&temporary)?;
+        file.write_all(bytes)?;
+        file.sync_all()?;
+        drop(file);
+        fs::rename(&temporary, path)?;
+        if let Ok(directory) = fs::File::open(parent) {
+            let _ = directory.sync_all();
+        }
+        Ok(())
+    })();
+    if result.is_err() {
+        let _ = fs::remove_file(&temporary);
+    }
+    result.map_err(|source| StateError::Write {
         path: path.display().to_string(),
         source,
     })
+}
+
+/// Validates the single grammar used for persisted and user-supplied run IDs.
+///
+/// # Errors
+///
+/// Returns [`StateError::InvalidRunId`] unless `id` is `fl_` followed by
+/// exactly sixteen lowercase hexadecimal characters.
+pub fn validate_run_id(id: &str) -> Result<(), StateError> {
+    let valid = id.strip_prefix("fl_").is_some_and(|suffix| {
+        suffix.len() == 16
+            && suffix
+                .bytes()
+                .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+    });
+    if valid {
+        Ok(())
+    } else {
+        Err(StateError::InvalidRunId(id.to_owned()))
+    }
 }
 
 #[cfg(test)]
@@ -183,7 +244,7 @@ mod tests {
         let store = RunStore::new(temporary.path());
         let run = RunRecord {
             version: 1,
-            id: "fl_test".to_owned(),
+            id: "fl_0123456789abcdef".to_owned(),
             repository_root: temporary.path().display().to_string(),
             base_revision: "abc".to_owned(),
             task: TaskInput {
@@ -203,7 +264,7 @@ mod tests {
         let store = RunStore::new(temporary.path());
         let run = RunRecord {
             version: 2,
-            id: "fl_future".to_owned(),
+            id: "fl_fedcba9876543210".to_owned(),
             repository_root: temporary.path().display().to_string(),
             base_revision: "abc".to_owned(),
             task: TaskInput {
@@ -217,6 +278,65 @@ mod tests {
         assert!(matches!(
             store.load_run(None),
             Err(StateError::UnsupportedVersion(2))
+        ));
+    }
+
+    #[test]
+    fn rejects_path_like_run_ids() {
+        let temporary = tempfile::tempdir().unwrap();
+        let store = RunStore::new(temporary.path());
+        for id in [
+            "../fl_0123456789abcdef",
+            "/tmp/fl_0123456789abcdef",
+            r"..\fl_0123456789abcdef",
+            r"C:\fl_0123456789abcdef",
+            "fl_0123456789ABCDEf",
+            "fl_short",
+        ] {
+            assert!(matches!(
+                store.load_run(Some(id)),
+                Err(StateError::InvalidRunId(_))
+            ));
+        }
+    }
+
+    #[test]
+    fn atomically_replaces_existing_run() {
+        let temporary = tempfile::tempdir().unwrap();
+        let store = RunStore::new(temporary.path());
+        let mut run = RunRecord {
+            version: 1,
+            id: "fl_0123456789abcdef".to_owned(),
+            repository_root: temporary.path().display().to_string(),
+            base_revision: "first".to_owned(),
+            task: TaskInput {
+                text: "Fix it".to_owned(),
+            },
+            intended_spec: IntendedSpec::default(),
+            model_calls: Vec::new(),
+            created_unix_ms: 0,
+        };
+        store.save_run(&run).unwrap();
+        run.base_revision = "second".to_owned();
+        store.save_run(&run).unwrap();
+        assert_eq!(store.load_run(None).unwrap(), run);
+        assert_eq!(
+            fs::read_dir(temporary.path().join(".flect/runs"))
+                .unwrap()
+                .count(),
+            1
+        );
+    }
+
+    #[test]
+    fn malformed_latest_identifier_fails_closed() {
+        let temporary = tempfile::tempdir().unwrap();
+        let state = temporary.path().join(".flect");
+        fs::create_dir_all(&state).unwrap();
+        fs::write(state.join("latest"), "../outside\n").unwrap();
+        assert!(matches!(
+            RunStore::new(temporary.path()).load_run(None),
+            Err(StateError::InvalidRunId(_))
         ));
     }
 }
