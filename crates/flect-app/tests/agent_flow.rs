@@ -69,6 +69,7 @@ fn complete_agent_handoff_is_blind_validated_and_persisted() {
     assert_eq!(judge.echoed_spec, echoed);
     assert!(judge.intended_spec.objective.contains(FORWARD_SENTINEL));
     assert!(Path::new(&judge.submission_file).is_file());
+    assert!(!Path::new(&judge.submission_file).starts_with(repository.path()));
     assert_eq!(judge.submission_schema["additionalProperties"], false);
 
     let submission = ReconciliationAgentSubmission {
@@ -81,7 +82,15 @@ fn complete_agent_handoff_is_blind_validated_and_persisted() {
         model: Some("runtime-inherited".to_owned()),
         model_selection: AgentModelSelection::Inherited,
     };
-    let record = service.submit_verdict(submission.clone()).unwrap();
+    write_judge_submission(&judge.submission_file, &submission);
+    assert!(
+        RunStore::new(repository.path())
+            .load_verification(None)
+            .is_err()
+    );
+    let record = service
+        .submit_verdict_file(Path::new(&judge.submission_file))
+        .unwrap();
     assert_eq!(record.isolation, flect_core::IsolationLevel::Structural);
     assert_eq!(record.model_calls.len(), 2);
     assert_eq!(record.model_calls[0].provider, "codex-native");
@@ -93,10 +102,11 @@ fn complete_agent_handoff_is_blind_validated_and_persisted() {
     );
     assert!(!Path::new(&blind_workspace).exists());
     assert!(!Path::new(&judge.submission_file).exists());
-    assert!(matches!(
-        service.submit_verdict(submission),
-        Err(AgentWorkflowError::InvalidJobState(_))
-    ));
+    assert!(
+        service
+            .submit_verdict_file(Path::new(&judge.submission_file))
+            .is_err()
+    );
 }
 
 #[test]
@@ -429,7 +439,7 @@ fn rejects_fabricated_verdict_evidence() {
         .unwrap();
     let judge = service.prepare_reconciliation(&blind.job_id).unwrap();
     let finding = "The requested behavior is missing".to_owned();
-    let result = service.submit_verdict(ReconciliationAgentSubmission {
+    let submission = ReconciliationAgentSubmission {
         job_id: judge.job_id,
         verdict: JudgeVerdict {
             alignment: Alignment::Partial,
@@ -442,8 +452,14 @@ fn rejects_fabricated_verdict_evidence() {
         },
         model: None,
         model_selection: AgentModelSelection::Unknown,
-    });
+    };
+    write_judge_submission(&judge.submission_file, &submission);
+    let result = service.submit_verdict_file(Path::new(&judge.submission_file));
     assert!(matches!(result, Err(AgentWorkflowError::Evidence(_))));
+}
+
+fn write_judge_submission(path: &str, submission: &ReconciliationAgentSubmission) {
+    fs::write(path, serde_json::to_vec(submission).unwrap()).unwrap();
 }
 
 fn fixture_repository() -> tempfile::TempDir {

@@ -222,20 +222,28 @@ fn exercise_agent_handoff(client: &mut McpClient) -> Value {
         .as_str()
         .unwrap();
     assert_ne!(judge_job_id, blind_job_id);
+    let submission_file = judge["result"]["structuredContent"]["submission_file"]
+        .as_str()
+        .unwrap();
+    std::fs::write(
+        submission_file,
+        serde_json::to_vec(&json!({
+            "job_id": judge_job_id,
+            "verdict": {
+                "alignment": "UNCERTAIN", "findings": [], "confidence": 0.4
+            },
+            "model": "test-judge", "model_selection": "explicit"
+        }))
+        .unwrap(),
+    )
+    .unwrap();
 
     let judged = client.call(
         11,
         "flect_submit_verdict",
-        &json!({
-            "job_id": judge_job_id,
-            "verdict": {
-                "alignment": "UNCERTAIN", "findings": [],
-                "confidence": 0.4
-            },
-            "model": "test-judge", "model_selection": "explicit"
-        }),
+        &json!({"submission_file": submission_file}),
     );
-    assert_eq!(judged["result"]["isError"], false);
+    assert_eq!(judged["result"]["isError"], false, "{judged}");
     assert_eq!(
         judged["result"]["structuredContent"]["model_calls"][0]["provider"],
         "codex-native"

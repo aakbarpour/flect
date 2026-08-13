@@ -17,7 +17,7 @@ use thiserror::Error;
 use crate::{EvidenceError, materialize_judge_verdict};
 
 const VERIFIER_INSTRUCTIONS: &str = "You are the blind Flect verifier. You have not been given the original task. Do not attempt to discover it. Inspect only the supplied sanitized patch evidence. Determine what behavior this patch appears to add, remove, or change. Return only a valid EchoedSpec matching the supplied schema. Each affected_scope entry is an object: file must exactly equal a path in the supplied manifest; symbol is optional descriptive function, class, or region detail and is not a path. Do not perform general style review. Do not invent files, lines, requirements, or motivations. Preserve uncertainty.";
-const JUDGE_INSTRUCTIONS: &str = "You are the Flect reconciliation judge. Do not use chat text as the protocol payload. Write exactly one ReconciliationAgentSubmission matching submission_schema to submission_file, then invoke `flect agent submit-verdict --submission <submission_file>` directly. Do not wrap JSON in Markdown, prose, or another object. Compare IntendedSpec with EchoedSpec for complete alignment, not merely whether a requested change is present: surface scope creep, unrelated behavior, added functionality, and task-boundary violations. When the patch advances a requested objective or requirement but has a missing requirement, constraint violation, or divergence, use PARTIAL; reserve DIFFERENT for behavior that is materially unrelated to or contradictory with the requested work. Make only the smallest semantic judgment: alignment, findings, and confidence. Each finding has kind, text, and optional evidence_ref. Use only kind values and evidence_ref values listed in evidence_contract. Never emit actions, IDs, files, patch text, line ranges, summaries, or uncertainties. SAME must have zero findings; PARTIAL and DIFFERENT must have at least one finding. Flect derives the trusted persisted Verdict.";
+const JUDGE_INSTRUCTIONS: &str = "You are the Flect reconciliation judge. Do not use chat text as the protocol payload. Write exactly one ReconciliationAgentSubmission matching submission_schema to submission_file. Do not invoke Flect commands or persist Flect state; a trusted orchestrator will submit only this designated opaque file after you finish. Do not wrap JSON in Markdown, prose, or another object. Compare IntendedSpec with EchoedSpec for complete alignment, not merely whether a requested change is present: surface scope creep, unrelated behavior, added functionality, and task-boundary violations. When the patch advances a requested objective or requirement but has a missing requirement, constraint violation, or divergence, use PARTIAL; reserve DIFFERENT for behavior that is materially unrelated to or contradictory with the requested work. Make only the smallest semantic judgment: alignment, findings, and confidence. Each finding has kind, text, and optional evidence_ref. Use only kind values and evidence_ref values listed in evidence_contract. Never emit actions, IDs, files, patch text, line ranges, summaries, or uncertainties. SAME must have zero findings; PARTIAL and DIFFERENT must have at least one finding. Flect derives the trusted persisted Verdict.";
 static JOB_SEQUENCE: AtomicU64 = AtomicU64::new(0);
 
 #[derive(Debug, Error)]
@@ -45,6 +45,8 @@ pub enum AgentWorkflowError {
     InvalidJobState(String),
     #[error("agent submission job ID does not match `{0}`")]
     JobMismatch(String),
+    #[error("submission file is not the designated file for judge `{0}`")]
+    SubmissionFileMismatch(String),
     #[error("blind response references unavailable scope `{0}`")]
     UnavailableScope(String),
     #[error("agent state is invalid: {0}")]
@@ -286,12 +288,21 @@ impl AgentService {
         Ok(job)
     }
 
-    /// Validates a judge response and persists the final verification record.
+    /// Reads only the prepared opaque submission file, then validates and persists its verdict.
     ///
     /// # Errors
     ///
     /// Returns an error for invalid lifecycle, fabricated evidence, or persistence failure.
-    pub fn submit_verdict(
+    pub fn submit_verdict_file(
+        &self,
+        submission_file: &Path,
+    ) -> Result<VerificationRecord, AgentWorkflowError> {
+        let (job_id, submission_file) = self.prepared_submission_file(submission_file)?;
+        let submission: ReconciliationAgentSubmission = read_state(&submission_file, &job_id)?;
+        self.submit_verdict(submission)
+    }
+
+    fn submit_verdict(
         &self,
         submission: ReconciliationAgentSubmission,
     ) -> Result<VerificationRecord, AgentWorkflowError> {
@@ -337,6 +348,41 @@ impl AgentService {
             self.remove_reconciliation_submission_file(&state.job.job_id)?;
         }
         Ok(record)
+    }
+
+    fn prepared_submission_file(
+        &self,
+        submission_file: &Path,
+    ) -> Result<(String, PathBuf), AgentWorkflowError> {
+        let workspace_root = canonical_existing(&self.workspace_root)?;
+        let directory = workspace_root.join("reconciliation-submissions");
+        if !directory.exists() {
+            return Err(AgentWorkflowError::UnsafeWorkspace);
+        }
+        let directory = canonical_existing(&directory)?;
+        if !directory.starts_with(&workspace_root)
+            || directory.parent() != Some(workspace_root.as_path())
+        {
+            return Err(AgentWorkflowError::UnsafeWorkspace);
+        }
+        let canonical = canonical_existing(submission_file)?;
+        let job_id = canonical
+            .file_stem()
+            .and_then(|name| name.to_str())
+            .ok_or(AgentWorkflowError::UnsafeWorkspace)?
+            .to_owned();
+        validate_job_id(&job_id)?;
+        if canonical.parent() != Some(directory.as_path())
+            || canonical.extension().and_then(|value| value.to_str()) != Some("json")
+        {
+            return Err(AgentWorkflowError::SubmissionFileMismatch(job_id));
+        }
+        let state = self.load_reconciliation_state(&job_id)?;
+        let expected = canonical_existing(Path::new(&state.job.submission_file))?;
+        if canonical != expected {
+            return Err(AgentWorkflowError::SubmissionFileMismatch(job_id));
+        }
+        Ok((job_id, canonical))
     }
 
     /// Removes only verified Flect-owned job directories.
@@ -470,7 +516,11 @@ impl AgentService {
             return Err(AgentWorkflowError::UnsafeWorkspace);
         }
         let path = directory.join(format!("{job_id}.json"));
-        fs::write(&path, []).map_err(|source| workspace_error(&path, source))?;
+        fs::OpenOptions::new()
+            .create_new(true)
+            .write(true)
+            .open(&path)
+            .map_err(|source| workspace_error(&path, source))?;
         Ok(path)
     }
 

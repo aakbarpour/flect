@@ -160,10 +160,10 @@ enum AgentCommand {
         #[arg(long)]
         blind_job: String,
     },
-    /// Validate, persist, and return a judge submission JSON file.
+    /// Read the designated opaque judge submission file, then validate and persist it.
     SubmitVerdict {
         #[arg(long, value_name = "PATH")]
-        submission: PathBuf,
+        submission_file: PathBuf,
     },
     /// Delete Flect-owned completed workspaces, or explicitly selected stale jobs.
     Cleanup {

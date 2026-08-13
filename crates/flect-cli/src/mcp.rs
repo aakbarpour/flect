@@ -6,16 +6,13 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use flect_app::AgentService;
-use flect_core::{
-    BlindAgentSubmission, ContextPolicy, EchoedSpec, GitRepository, JudgeVerdict,
-    ReconciliationAgentSubmission, RunStore,
-};
+use flect_core::{BlindAgentSubmission, ContextPolicy, EchoedSpec, GitRepository, RunStore};
 use miette::{IntoDiagnostic, Result, WrapErr};
 use schemars::schema_for;
 use serde_json::{Map, Value, json};
 
 const PROTOCOL_VERSION: &str = "2025-11-25";
-const INSTRUCTIONS: &str = "Use flect_start before implementation. The configured API route defaults to gpt-5.6-luna with one bounded gpt-5.6-terra fallback; both remain configurable. For Codex-native verification, call flect_prepare_blind, hand only its allowed resources to a fresh no-parent-context verifier, submit its EchoedSpec with flect_submit_echo, and prepare a separate judge with flect_prepare_reconciliation. The judge must submit directly through flect_submit_verdict when this tool is exposed to it; otherwise it must write the exact generated ReconciliationAgentSubmission file and invoke flect agent submit-verdict itself. Never parse or re-submit a judge chat response. Alternatively, flect_verify retains the configured automated API workflow. Use flect_get_result to retrieve the persisted verdict.";
+const INSTRUCTIONS: &str = "Use flect_start before implementation. The configured API route defaults to gpt-5.6-luna with one bounded gpt-5.6-terra fallback; both remain configurable. For Codex-native verification, call flect_prepare_blind, hand only its allowed resources to a fresh no-parent-context verifier, submit its EchoedSpec with flect_submit_echo, and prepare a separate judge with flect_prepare_reconciliation. The judge writes the exact generated ReconciliationAgentSubmission only to its designated submission_file, then stops. A trusted orchestrator submits only that opaque submission_file through flect_submit_verdict; never parse or re-submit a judge chat response. Alternatively, flect_verify retains the configured automated API workflow. Use flect_get_result to retrieve the persisted verdict.";
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 enum Lifecycle {
@@ -248,14 +245,8 @@ fn validate_arguments(
             required_string(arguments, "blind_job_id")?;
         }
         "flect_submit_verdict" => {
-            reject_unknown(
-                arguments,
-                &["job_id", "verdict", "model", "model_selection"],
-            )?;
-            required_string(arguments, "job_id")?;
-            required_object(arguments, "verdict")?;
-            optional_string(arguments, "model")?;
-            model_selection(arguments)?;
+            reject_unknown(arguments, &["submission_file"])?;
+            required_string(arguments, "submission_file")?;
         }
         "flect_get_result" => {
             reject_unknown(arguments, &["run"])?;
@@ -400,12 +391,10 @@ fn submit_verdict(
     arguments: &Map<String, Value>,
     working_directory: &Path,
 ) -> std::result::Result<Value, String> {
-    let submission =
-        serde_json::from_value::<ReconciliationAgentSubmission>(Value::Object(arguments.clone()))
-            .map_err(|error| format!("invalid reconciliation submission: {error}"))?;
+    let submission_file = required_string(arguments, "submission_file")?;
     let service = AgentService::discover(working_directory).map_err(|error| error.to_string())?;
     let record = service
-        .submit_verdict(submission)
+        .submit_verdict_file(Path::new(&submission_file))
         .map_err(|error| error.to_string())?;
     serde_json::to_value(record).map_err(|error| error.to_string())
 }
@@ -609,8 +598,12 @@ fn tools() -> Vec<Value> {
         ),
         tool(
             "flect_submit_verdict",
-            "Validate a judge Verdict against available evidence and persist the final result.",
-            agent_submission_schema("verdict", json!(schema_for!(JudgeVerdict))),
+            "Read only the designated opaque judge submission file, validate it, and persist the final result.",
+            json!({
+                "type": "object",
+                "properties": {"submission_file": {"type": "string", "minLength": 1}},
+                "required": ["submission_file"], "additionalProperties": false
+            }),
             false,
         ),
         tool(
@@ -781,7 +774,7 @@ mod tests {
     }
 
     #[test]
-    fn agent_submission_schemas_include_typed_payloads() {
+    fn agent_submission_schemas_keep_echo_typed_and_verdict_path_bound() {
         let tools = tools();
         let echo = tools
             .iter()
@@ -796,8 +789,9 @@ mod tests {
             .find(|tool| tool["name"] == "flect_submit_verdict")
             .unwrap();
         assert_eq!(
-            verdict["inputSchema"]["properties"]["verdict"]["additionalProperties"],
-            false
+            verdict["inputSchema"]["properties"]["submission_file"]["type"],
+            "string"
         );
+        assert!(verdict["inputSchema"]["properties"]["verdict"].is_null());
     }
 }

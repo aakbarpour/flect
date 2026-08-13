@@ -472,10 +472,11 @@ fn agent(command: &AgentCommand, _json_output: bool) -> Result<()> {
                 .prepare_reconciliation(blind_job)
                 .map_err(to_report)?,
         ),
-        AgentCommand::SubmitVerdict { submission } => {
-            let submission = read_json_file(submission)?;
-            serde_json::to_value(service.submit_verdict(submission).map_err(to_report)?)
-        }
+        AgentCommand::SubmitVerdict { submission_file } => serde_json::to_value(
+            service
+                .submit_verdict_file(submission_file)
+                .map_err(to_report)?,
+        ),
         AgentCommand::Cleanup {
             dry_run,
             all,

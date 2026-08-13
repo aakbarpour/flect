@@ -34,7 +34,7 @@ The `cwd` must be the Git worktree Flect should inspect. Environment variables r
 - `flect_prepare_blind` creates sanitized read-only resources and a typed fresh-verifier job.
 - `flect_submit_echo` validates and accepts one typed verifier response.
 - `flect_prepare_reconciliation` creates the contract and Flect-owned direct-submission file for a different fresh judge.
-- `flect_submit_verdict` validates evidence, closes the judge job, and persists the result. If this MCP tool is not exposed to a fresh child, the child must use the contract's `submission_file` with `flect agent submit-verdict --submission`; a parent must never parse or re-submit the child chat response.
+- `flect_submit_verdict` accepts only the contract's designated opaque `submission_file`, validates its contents, closes the judge job, and persists the result. The fresh child writes that file but never calls Flect or writes `.flect/` state; a trusted parent submits only the path and never parses the file or judge chat response.
 - `flect_get_result` retrieves that persisted result.
 
 State-changing tools write only Flect's project-local `.flect/` state and prepared agent resources under the operating-system temporary directory. Flect's Git access remains read-only. The MCP process writes protocol messages to stdout and diagnostics to stderr.

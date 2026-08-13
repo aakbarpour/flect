@@ -235,6 +235,15 @@ fn direct_judge_submission_is_strict_and_does_not_use_chat_text() {
     assert!(!fabricated.status.success());
 
     fs::write(submission, &verdict).unwrap();
+    let substituted = directory.path().join("substituted").join(
+        submission
+            .file_name()
+            .expect("Flect-generated submission file has a name"),
+    );
+    fs::create_dir_all(substituted.parent().unwrap()).unwrap();
+    fs::write(&substituted, &verdict).unwrap();
+    let substituted = submit_verdict(repository.path(), &substituted);
+    assert!(!substituted.status.success());
     let accepted = submit_verdict(repository.path(), submission);
     assert_success(&accepted);
     let reused = submit_verdict(repository.path(), submission);
@@ -252,7 +261,7 @@ fn flect<const N: usize>(directory: &Path, arguments: [&str; N]) -> Output {
 fn submit_verdict(directory: &Path, submission: &Path) -> Output {
     Command::new(env!("CARGO_BIN_EXE_flect"))
         .current_dir(directory)
-        .args(["--json", "agent", "submit-verdict", "--submission"])
+        .args(["--json", "agent", "submit-verdict", "--submission-file"])
         .arg(submission)
         .output()
         .unwrap()

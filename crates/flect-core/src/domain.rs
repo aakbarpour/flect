@@ -465,7 +465,8 @@ pub struct ReconciliationAgentJob {
     pub evidence_contract: serde_json::Value,
     pub verdict_schema: serde_json::Value,
     /// Flect-owned writable file that a fresh judge must populate with one exact
-    /// `ReconciliationAgentSubmission` before invoking `flect agent submit-verdict`.
+    /// `ReconciliationAgentSubmission`; a trusted orchestrator later submits only
+    /// this opaque path to `flect agent submit-verdict --submission-file`.
     pub submission_file: String,
     /// Strict schema for the direct submission file. This deliberately wraps the
     /// untrusted verdict with its lifecycle and model metadata.
