@@ -9,7 +9,14 @@ param(
 
     [string]$ControllerRoot,
 
-    [string]$RunId
+    [string]$RunId,
+
+    [ValidateSet('canonical-5', 'all')]
+    [string]$Selection = 'canonical-5',
+
+    [string[]]$CaseId,
+
+    [switch]$PreflightOnly
 )
 
 $ErrorActionPreference = 'Stop'
@@ -28,6 +35,7 @@ $SuitePath = [System.IO.Path]::GetFullPath($SuitePath)
 $CaseRoot = [System.IO.Path]::GetFullPath($CaseRoot)
 $ControllerRoot = [System.IO.Path]::GetFullPath($ControllerRoot)
 $FlectBinary = [System.IO.Path]::GetFullPath($FlectBinary)
+Import-Module (Join-Path $PSScriptRoot 'fixture-materializer.psm1') -Force
 if ([string]::IsNullOrWhiteSpace($RunId)) {
     $RunId = "canonical-$(Get-Date -Format 'yyyyMMddHHmmss')-$([Guid]::NewGuid().ToString('N'))"
 }
@@ -207,26 +215,20 @@ function Write-AgentDispatchInstructions {
     Write-Utf8File $Path ($manifest | ConvertTo-Json -Depth 20)
 }
 
-function New-CandidatePatch {
-    param($Case)
-
-    $lines = [System.Collections.Generic.List[string]]::new()
-    foreach ($file in $Case.candidate_patch.files) {
-        if ($file.status -ne 'modified' -or $file.binary) {
-            throw "Canonical harness supports only text modified patches; $($Case.id) has $($file.path)"
-        }
-        $lines.Add("diff --git a/$($file.path) b/$($file.path)")
-        $lines.Add("--- a/$($file.path)")
-        $lines.Add("+++ b/$($file.path)")
-        $lines.Add($file.patch)
-    }
-    return (($lines -join "`n") + "`n")
-}
-
 $sourcePinned = Get-PinnedFlect $FlectBinary
 $suite = Get-Content -LiteralPath $SuitePath -Raw | ConvertFrom-Json
-$cases = @($suite.cases | Where-Object { $_.subset -eq 'canonical-5' })
-if ($cases.Count -ne 5) {
+$cases = if ($Selection -eq 'all') { @($suite.cases) } else { @($suite.cases | Where-Object { $_.subset -eq 'canonical-5' }) }
+if ($CaseId) {
+    $wanted = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::Ordinal)
+    foreach ($id in $CaseId) {
+        foreach ($value in ($id -split ',')) {
+            if (-not [string]::IsNullOrWhiteSpace($value)) { $null = $wanted.Add($value) }
+        }
+    }
+    $cases = @($cases | Where-Object { $wanted.Contains($_.id) })
+    if ($cases.Count -ne $wanted.Count) { throw 'one or more requested fixture case IDs are absent from the selected suite' }
+}
+if ($Selection -eq 'canonical-5' -and $cases.Count -ne 5) {
     throw "Expected five canonical cases, found $($cases.Count)"
 }
 
@@ -242,6 +244,7 @@ $grammar = Get-TypedCommandGrammar $pinned
 
 $summary = @()
 foreach ($case in $cases) {
+    try {
     $casePath = Join-Path $CaseRoot $case.id
     $controlPath = Join-Path $ControllerRoot $case.id
     $agentTempRoot = Join-Path $controlPath 'agent-temp'
@@ -256,7 +259,6 @@ foreach ($case in $cases) {
     Write-Utf8File (Join-Path $controlPath 'case.json') ($case | ConvertTo-Json -Depth 100)
     Write-Utf8File (Join-Path $controlPath 'intended-spec.json') ($case.intended_spec | ConvertTo-Json -Depth 100)
     $candidatePatchPath = Join-Path $controlPath 'candidate.patch'
-    Write-Utf8File $candidatePatchPath (New-CandidatePatch $case)
 
     foreach ($baseFile in $case.base_files) {
         Write-Utf8File (Join-Path $casePath $baseFile.path) $baseFile.content
@@ -265,6 +267,7 @@ foreach ($case in $cases) {
     Invoke-CaseCommand $casePath 'git' @('init', '-b', 'main') $null
     Invoke-CaseCommand $casePath 'git' @('config', 'user.email', 'benchmark@flect.local') $null
     Invoke-CaseCommand $casePath 'git' @('config', 'user.name', 'Flect Canonical Harness') $null
+    Invoke-CaseCommand $casePath 'git' @('config', 'core.autocrlf', 'false') $null
     Invoke-CaseCommand $casePath 'git' @('add', '--all') $null
     Invoke-CaseCommand $casePath 'git' @('commit', '--quiet', '-m', 'canonical fixture base') $null
     Assert-PinnedFlect $pinned
@@ -274,15 +277,27 @@ foreach ($case in $cases) {
     Assert-PinnedFlect $pinned
     Invoke-CaseCommand $casePath $pinned.path @('start', '--task', $case.original_task, '--spec-file', (Join-Path $controlPath 'intended-spec.json')) $agentTempRoot
 
-    # Apply and validate the exact controller-owned candidate bytes before dispatch.
-    Invoke-CaseCommand $casePath 'git' @('apply', '--check', $candidatePatchPath) $null
+    # Prefer an exact native Git patch; otherwise materialize the fixture hunk body
+    # structurally and fail closed on absent or ambiguous base content.
+    $materialization = Invoke-FixtureMaterialization $casePath $case $candidatePatchPath
     $patchHash = (Get-FileHash -LiteralPath $candidatePatchPath -Algorithm SHA256).Hash
-    Invoke-CaseCommand $casePath 'git' @('apply', '--whitespace=nowarn', $candidatePatchPath) $null
-    Invoke-CaseCommand $casePath 'git' @('apply', '--check', '--reverse', $candidatePatchPath) $null
     Invoke-CaseCommand $casePath 'git' @('diff', '--check') $null
 
+    Assert-FixtureMaterialization $casePath $case
     Assert-CaseStatus $case $casePath
     Assert-NoControlFiles $casePath
+
+    if ($PreflightOnly) {
+        $summary += [pscustomobject]@{
+            case = $case.id
+            materialization_mode = $materialization.mode
+            hunk_count_metadata_valid = $materialization.hunk_count_metadata_valid
+            status = ((git -C $casePath status --porcelain --untracked-files=all) -join '; ')
+            candidate_patch_sha256 = $patchHash
+            blind_bundle = 'not_dispatched'
+        }
+        continue
+    }
 
     $blindJobPath = Join-Path $controlPath 'blind-job.json'
     Push-Location $casePath
@@ -324,11 +339,31 @@ foreach ($case in $cases) {
         case = $case.id
         status = ((git -C $casePath status --porcelain --untracked-files=all) -join '; ')
         candidate_patch_sha256 = $patchHash
+        materialization_mode = $materialization.mode
+        hunk_count_metadata_valid = $materialization.hunk_count_metadata_valid
         blind_job_id = $blindJob.job_id
         flect_sha256 = $pinned.sha256
         agent_state_root = $agentStateRoot
         blind_bundle = 'clean'
     }
+    }
+    catch {
+        if (-not $PreflightOnly) { throw }
+        $summary += [pscustomobject]@{
+            case = $case.id
+            materialization_mode = 'rejected'
+            hunk_count_metadata_valid = $null
+            status = $null
+            candidate_patch_sha256 = $null
+            blind_bundle = 'not_dispatched'
+            failure = $_.Exception.Message
+        }
+    }
 }
 
-$summary | ConvertTo-Json -Depth 10
+$summaryJson = $summary | ConvertTo-Json -Depth 10
+if ($PreflightOnly) { Write-Utf8File (Join-Path $ControllerRoot 'preflight-summary.json') $summaryJson }
+$summaryJson
+if ($PreflightOnly -and @($summary | Where-Object { $_.materialization_mode -eq 'rejected' }).Count -gt 0) {
+    throw 'one or more fixture cases could not be materialized'
+}
