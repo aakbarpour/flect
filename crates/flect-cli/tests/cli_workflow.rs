@@ -175,8 +175,12 @@ fn direct_judge_submission_is_strict_and_does_not_use_chat_text() {
     let text = tempfile::tempdir().unwrap();
     let objective = text.path().join("objective.txt");
     let after = text.path().join("after.txt");
+    let side_effect = text.path().join("side-effect.txt");
+    let side_effect_reason = text.path().join("side-effect-reason.txt");
     fs::write(&objective, "Change app behavior").unwrap();
     fs::write(&after, "New behavior").unwrap();
+    fs::write(&side_effect, "Callers observe new behavior").unwrap();
+    fs::write(&side_effect_reason, "This restates the changed behavior.").unwrap();
     assert_success(flect(
         repository.path(),
         [
@@ -191,6 +195,21 @@ fn direct_judge_submission_is_strict_and_does_not_use_chat_text() {
             "explicit",
         ],
     ));
+    assert_success(
+        Command::new(env!("CARGO_BIN_EXE_flect"))
+            .current_dir(repository.path())
+            .args([
+                "--json",
+                "agent",
+                "verifier-add-side-effect",
+                "--job",
+                blind_job_id,
+                "--text-file",
+            ])
+            .arg(&side_effect)
+            .output()
+            .unwrap(),
+    );
     assert_success(
         Command::new(env!("CARGO_BIN_EXE_flect"))
             .current_dir(repository.path())
@@ -296,6 +315,23 @@ fn direct_judge_submission_is_strict_and_does_not_use_chat_text() {
         ],
     );
     assert!(!invalid_kind.status.success());
+    assert_success(
+        Command::new(env!("CARGO_BIN_EXE_flect"))
+            .current_dir(repository.path())
+            .args([
+                "--json",
+                "agent",
+                "judge-mark-side-effect-not-distinct",
+                "--job",
+                judge_job_id,
+                "--candidate",
+                "side_effect/0",
+                "--reason-file",
+            ])
+            .arg(&side_effect_reason)
+            .output()
+            .unwrap(),
+    );
     assert_success(flect(
         repository.path(),
         [

@@ -504,6 +504,10 @@ fn agent(command: &AgentCommand, _json_output: bool) -> Result<()> {
                 .map_err(to_report)?;
             Ok(json!({"job_id": job, "status": "collecting"}))
         }
+        AgentCommand::JudgeAddSideEffectFinding { .. }
+        | AgentCommand::JudgeMarkSideEffectNotDistinct { .. } => {
+            Ok(judge_side_effect_disposition(&service, command)?)
+        }
         AgentCommand::JudgeSetConfidence { job, confidence } => {
             service
                 .judge_set_confidence(job, *confidence)
@@ -626,6 +630,39 @@ fn external_verifier_command(command: &AgentCommand) -> Result<Option<serde_json
         }
         _ => Ok(None),
     }
+}
+
+fn judge_side_effect_disposition(
+    service: &flect_app::AgentService,
+    command: &AgentCommand,
+) -> Result<serde_json::Value> {
+    let job = match command {
+        AgentCommand::JudgeAddSideEffectFinding {
+            job,
+            candidate,
+            text_file,
+            evidence_ref,
+        } => {
+            let text = read_agent_text(text_file, "judge side effect finding")?;
+            service
+                .judge_add_side_effect_finding(job, candidate.clone(), text, evidence_ref.clone())
+                .map_err(to_report)?;
+            job
+        }
+        AgentCommand::JudgeMarkSideEffectNotDistinct {
+            job,
+            candidate,
+            reason_file,
+        } => {
+            let reason = read_agent_text(reason_file, "judge side effect disposition")?;
+            service
+                .judge_mark_side_effect_not_distinct(job, candidate.clone(), reason)
+                .map_err(to_report)?;
+            job
+        }
+        _ => unreachable!("only judge side-effect commands reach this helper"),
+    };
+    Ok(json!({"job_id": job, "status": "collecting"}))
 }
 
 fn verifier_add_text(

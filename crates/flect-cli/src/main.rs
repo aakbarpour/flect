@@ -258,6 +258,26 @@ enum AgentCommand {
         #[arg(long)]
         evidence_ref: Option<String>,
     },
+    /// Disposition one verifier-reported side effect as a distinct finding with evidence.
+    JudgeAddSideEffectFinding {
+        #[arg(long)]
+        job: String,
+        #[arg(long)]
+        candidate: String,
+        #[arg(long, value_name = "PATH")]
+        text_file: PathBuf,
+        #[arg(long)]
+        evidence_ref: String,
+    },
+    /// Record why one verifier-reported side effect is not a distinct finding.
+    JudgeMarkSideEffectNotDistinct {
+        #[arg(long)]
+        job: String,
+        #[arg(long)]
+        candidate: String,
+        #[arg(long, value_name = "PATH")]
+        reason_file: PathBuf,
+    },
     /// Set the finite confidence in the inclusive range 0 through 1.
     JudgeSetConfidence {
         #[arg(long)]

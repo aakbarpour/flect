@@ -18,7 +18,7 @@ use thiserror::Error;
 use crate::{EvidenceError, materialize_judge_verdict};
 
 const VERIFIER_INSTRUCTIONS: &str = "You are the blind Flect verifier. You have not been given the original task. Do not attempt to discover it. Inspect only the supplied sanitized patch evidence. Determine what behavior this patch appears to add, remove, or change. Invoke Flect's typed verifier lifecycle yourself: `flect agent verifier-begin --job <job>`, `verifier-set-objective --text-file <path>`, zero or more `verifier-add-before --text-file <path>`, `verifier-add-after --text-file <path>`, `verifier-add-scope --file <allowed-path> [--symbol-file <path>]`, `verifier-add-side-effect --text-file <path>`, `verifier-add-assumption --text-file <path>`, and `verifier-add-uncertainty --text-file <path>`, then `verifier-set-confidence --job <job> <0..1>` and `verifier-submit --job <job>`. Do not write JSON, invoke repository-scoped commands, write to the repository, or return a protocol payload in chat. Flect owns job binding, structure, validation, and serialization. Each affected_scope file must exactly equal a path in the supplied manifest; symbol is optional descriptive function, class, or region detail. Do not perform general style review. Do not invent files, lines, requirements, or motivations. Preserve uncertainty.";
-const JUDGE_INSTRUCTIONS: &str = "You are the Flect reconciliation judge. Do not write JSON and do not use chat text as the protocol payload. Invoke the typed Flect lifecycle yourself: `flect agent judge-begin --job <job>`, `judge-set-alignment --job <job> <SAME|PARTIAL|DIFFERENT|UNCERTAIN>`, zero or more `judge-add-finding --job <job> --kind <kind> --text-file <path> [--evidence-ref <hunk/id>]`, `judge-set-confidence --job <job> <0..1>`, then `judge-submit --job <job>`. Flect owns the job binding, envelope, serialization, evidence materialization, and persistence. Use only evidence_ref IDs in evidence_ref_contract. Compare IntendedSpec with EchoedSpec for complete alignment, not merely whether a requested change is present: surface scope creep, unrelated behavior, added functionality, and task-boundary violations. When a supported unrequested change or violated constraint has a separately described, distinct downstream behavioral consequence, emit both the base finding and a potential_side_effect; do not emit a potential_side_effect that merely restates the same divergence. SAME must have zero findings; PARTIAL and DIFFERENT must have at least one finding.";
+const JUDGE_INSTRUCTIONS: &str = "You are the Flect reconciliation judge. Do not write JSON and do not use chat text as the protocol payload. Invoke the typed Flect lifecycle yourself: `flect agent judge-begin --job <job>`, `judge-set-alignment --job <job> <SAME|PARTIAL|DIFFERENT|UNCERTAIN>`, zero or more `judge-add-finding --job <job> --kind <kind> --text-file <path> [--evidence-ref <hunk/id>]`, then disposition every listed `side_effect/<n>` with either `judge-add-side-effect-finding --candidate <id> --text-file <path> --evidence-ref <hunk/id>` or `judge-mark-side-effect-not-distinct --candidate <id> --reason-file <path>`, `judge-set-confidence --job <job> <0..1>`, and `judge-submit --job <job>`. Flect owns the job binding, envelope, serialization, evidence materialization, and persistence. Use only evidence_ref IDs in evidence_ref_contract. Compare IntendedSpec with EchoedSpec for complete alignment, not merely whether a requested change is present: surface scope creep, unrelated behavior, added functionality, and task-boundary violations. A constraint violation or downstream side effect alone does not establish DIFFERENT: use PARTIAL when the requested objective is materially advanced with divergence. DIFFERENT requires a missing requirement or unrequested change that supports unrelated, replacing, or contradictory work. Each verifier-reported side effect must be explicitly dispositioned; do not emit a potential_side_effect that merely restates the same divergence. SAME must have zero findings; PARTIAL and DIFFERENT must have at least one finding.";
 static JOB_SEQUENCE: AtomicU64 = AtomicU64::new(0);
 
 #[derive(Debug, Error)]
@@ -52,6 +52,8 @@ pub enum AgentWorkflowError {
     UnavailableScope(String),
     #[error("agent state is invalid: {0}")]
     InvalidState(String),
+    #[error("DIFFERENT requires a missing requirement or unrequested change finding")]
+    DifferentWithoutObjectiveMismatch,
     #[error("agent workspace ownership could not be established for {0}")]
     UnsafeCleanup(String),
     #[error("submitted verdict failed trusted validation: {0}")]
@@ -285,6 +287,7 @@ impl AgentService {
             .load_run(Some(&blind.job.run_id))
             .map_err(|error| AgentWorkflowError::RunState(error.to_string()))?;
         let job_id = generate_id("judge", &blind.job.run_id)?;
+        let evidence_ref_contract = evidence_ref_contract(&blind.job.bundle, &echoed_spec);
         let job = ReconciliationAgentJob {
             version: 1,
             job_id,
@@ -293,7 +296,7 @@ impl AgentService {
             instructions: JUDGE_INSTRUCTIONS.to_owned(),
             intended_spec: run.intended_spec,
             echoed_spec,
-            evidence_ref_contract: evidence_ref_contract(&blind.job.bundle),
+            evidence_ref_contract,
         };
         self.save_reconciliation_state(&ReconciliationState {
             version: 1,
@@ -327,6 +330,7 @@ impl AgentService {
             alignment: None,
             confidence: None,
             findings: Vec::new(),
+            side_effect_dispositions: Vec::new(),
             model,
             model_selection,
         });
@@ -380,6 +384,80 @@ impl AgentService {
         self.with_judge_draft(job_id, |draft| draft.confidence = Some(confidence))
     }
 
+    /// Adds a distinct verifier-reported side effect as a typed finding.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error for an unavailable or already dispositioned candidate.
+    pub fn judge_add_side_effect_finding(
+        &self,
+        job_id: &str,
+        candidate: String,
+        text: String,
+        evidence_ref: String,
+    ) -> Result<(), AgentWorkflowError> {
+        self.with_judge_state(job_id, |echoed_spec, draft| {
+            let side_effect_index = side_effect_candidate_index(echoed_spec, &candidate)?;
+            if draft
+                .side_effect_dispositions
+                .iter()
+                .any(|disposition| disposition.candidate == candidate)
+            {
+                return Err(AgentWorkflowError::InvalidState(format!(
+                    "side effect candidate `{candidate}` was already dispositioned"
+                )));
+            }
+            let finding_index = draft.findings.len();
+            draft.findings.push(JudgeFinding {
+                kind: FindingCategory::PotentialSideEffects,
+                text,
+                evidence_ref: Some(evidence_ref),
+            });
+            draft.side_effect_dispositions.push(SideEffectDisposition {
+                candidate,
+                side_effect_index,
+                kind: SideEffectDispositionKind::Finding { finding_index },
+            });
+            Ok(())
+        })
+    }
+
+    /// Marks a verifier-reported side effect as not a distinct finding.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error for an unavailable candidate, duplicate disposition, or empty reason.
+    pub fn judge_mark_side_effect_not_distinct(
+        &self,
+        job_id: &str,
+        candidate: String,
+        reason: String,
+    ) -> Result<(), AgentWorkflowError> {
+        self.with_judge_state(job_id, |echoed_spec, draft| {
+            let side_effect_index = side_effect_candidate_index(echoed_spec, &candidate)?;
+            if reason.trim().is_empty() {
+                return Err(AgentWorkflowError::InvalidState(
+                    "side effect non-distinct reason must not be empty".to_owned(),
+                ));
+            }
+            if draft
+                .side_effect_dispositions
+                .iter()
+                .any(|disposition| disposition.candidate == candidate)
+            {
+                return Err(AgentWorkflowError::InvalidState(format!(
+                    "side effect candidate `{candidate}` was already dispositioned"
+                )));
+            }
+            draft.side_effect_dispositions.push(SideEffectDisposition {
+                candidate,
+                side_effect_index,
+                kind: SideEffectDispositionKind::NotDistinct { reason },
+            });
+            Ok(())
+        })
+    }
+
     /// Validates Flect-owned typed semantic state, constructs the domain verdict, and persists it.
     ///
     /// # Errors
@@ -394,6 +472,7 @@ impl AgentService {
             .draft
             .clone()
             .ok_or_else(|| AgentWorkflowError::InvalidJobState(job_id.to_owned()))?;
+        validate_side_effect_dispositions(&draft, &state.job.echoed_spec)?;
         let verdict = JudgeVerdict {
             alignment: draft.alignment.ok_or_else(|| {
                 AgentWorkflowError::InvalidState("judge alignment was not set".to_owned())
@@ -403,6 +482,7 @@ impl AgentService {
                 AgentWorkflowError::InvalidState("judge confidence was not set".to_owned())
             })?,
         };
+        validate_typed_judge_invariants(&verdict)?;
         let verdict = materialize_judge_verdict(verdict, &state.bundle)?;
         let record = VerificationRecord {
             version: 1,
@@ -440,6 +520,17 @@ impl AgentService {
         job_id: &str,
         update: impl FnOnce(&mut JudgeDraft),
     ) -> Result<(), AgentWorkflowError> {
+        self.with_judge_state(job_id, |_, draft| {
+            update(draft);
+            Ok(())
+        })
+    }
+
+    fn with_judge_state(
+        &self,
+        job_id: &str,
+        update: impl FnOnce(&EchoedSpec, &mut JudgeDraft) -> Result<(), AgentWorkflowError>,
+    ) -> Result<(), AgentWorkflowError> {
         let mut state = self.load_reconciliation_state(job_id)?;
         if state.status != ReconciliationStatus::Collecting || state.job.job_id != job_id {
             return Err(AgentWorkflowError::InvalidJobState(job_id.to_owned()));
@@ -448,7 +539,8 @@ impl AgentService {
             .draft
             .as_mut()
             .ok_or_else(|| AgentWorkflowError::InvalidJobState(job_id.to_owned()))?;
-        update(draft);
+        let echoed_spec = state.job.echoed_spec.clone();
+        update(&echoed_spec, draft)?;
         self.save_reconciliation_state(&state)
     }
 
@@ -631,7 +723,7 @@ impl AgentService {
     }
 }
 
-fn evidence_ref_contract(bundle: &BlindBundle) -> Value {
+fn evidence_ref_contract(bundle: &BlindBundle, echoed_spec: &EchoedSpec) -> Value {
     let mut hunk_index = 0_u32;
     let files = bundle.patch.files.iter().map(|file| {
         let hunks = file.patch.split("@@ ").skip(1).filter_map(|part| {
@@ -648,7 +740,7 @@ fn evidence_ref_contract(bundle: &BlindBundle) -> Value {
         serde_json::json!({"file": file.path, "hunks": hunks})
     }).collect::<Vec<_>>();
     serde_json::json!({
-        "version": 3,
+        "version": 4,
         "finding_fields": ["kind", "text", "evidence_ref"],
         "forbidden_finding_fields": [
             "evidence",
@@ -685,11 +777,13 @@ fn evidence_ref_contract(bundle: &BlindBundle) -> Value {
             "evidence_ref, when present, must equal one listed stable hunk ID.",
             "SAME requires findings to be empty; PARTIAL and DIFFERENT require at least one finding.",
             "Do not return SAME merely because a requested change is present; SAME requires no supported divergence from the full IntendedSpec.",
-            "Before finalizing a non-SAME verdict, check whether each supported unrequested change or violated constraint has a distinct downstream consequence described by EchoedSpec; when it is externally observable, emit both the base finding and potential_side_effect rather than substituting one for the other.",
+            "DIFFERENT requires at least one missing_requirement or unrequested_change finding; violated_constraint and potential_side_effect findings alone do not establish objective mismatch.",
+            "Every side_effect candidate must be dispositioned before submit. Use a typed side-effect finding with valid evidence for a distinct consequence, or record why it is not distinct.",
             "confidence is required and must be a number from 0 through 1."
         ],
         "finding_example": files.iter().find_map(|file| file["hunks"].as_array().and_then(|hunks| hunks.first()).map(|hunk| serde_json::json!({"kind": "violated_constraint", "text": "The changed setting violates the constraint.", "evidence_ref": hunk["hunk_id"]}))),
-        "files": files
+        "files": files,
+        "side_effect_candidates": echoed_spec.side_effects.iter().enumerate().map(|(index, text)| serde_json::json!({"id": format!("side_effect/{index}"), "text": text})).collect::<Vec<_>>()
     })
 }
 
@@ -989,8 +1083,95 @@ struct JudgeDraft {
     alignment: Option<Alignment>,
     confidence: Option<f64>,
     findings: Vec<JudgeFinding>,
+    side_effect_dispositions: Vec<SideEffectDisposition>,
     model: Option<String>,
     model_selection: AgentModelSelection,
+}
+
+#[derive(Clone, Serialize, Deserialize)]
+struct SideEffectDisposition {
+    candidate: String,
+    side_effect_index: usize,
+    kind: SideEffectDispositionKind,
+}
+
+#[derive(Clone, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case", tag = "kind")]
+enum SideEffectDispositionKind {
+    Finding { finding_index: usize },
+    NotDistinct { reason: String },
+}
+
+fn side_effect_candidate_index(
+    echoed_spec: &EchoedSpec,
+    candidate: &str,
+) -> Result<usize, AgentWorkflowError> {
+    let Some(index) = candidate
+        .strip_prefix("side_effect/")
+        .and_then(|value| value.parse::<usize>().ok())
+    else {
+        return Err(AgentWorkflowError::InvalidState(format!(
+            "invalid side effect candidate `{candidate}`"
+        )));
+    };
+    if echoed_spec.side_effects.get(index).is_none() {
+        return Err(AgentWorkflowError::InvalidState(format!(
+            "unavailable side effect candidate `{candidate}`"
+        )));
+    }
+    Ok(index)
+}
+
+fn validate_side_effect_dispositions(
+    draft: &JudgeDraft,
+    echoed_spec: &EchoedSpec,
+) -> Result<(), AgentWorkflowError> {
+    for index in 0..echoed_spec.side_effects.len() {
+        let candidate = format!("side_effect/{index}");
+        let disposition = draft
+            .side_effect_dispositions
+            .iter()
+            .find(|disposition| disposition.candidate == candidate)
+            .ok_or_else(|| {
+                AgentWorkflowError::InvalidState(format!(
+                    "verifier side effect candidate `{candidate}` has no disposition"
+                ))
+            })?;
+        if disposition.side_effect_index != index {
+            return Err(AgentWorkflowError::InvalidState(format!(
+                "side effect candidate `{candidate}` has an invalid disposition"
+            )));
+        }
+        if let SideEffectDispositionKind::Finding { finding_index } = disposition.kind {
+            let finding = draft.findings.get(finding_index).ok_or_else(|| {
+                AgentWorkflowError::InvalidState(format!(
+                    "side effect candidate `{candidate}` has no linked finding"
+                ))
+            })?;
+            if finding.kind != FindingCategory::PotentialSideEffects
+                || finding.evidence_ref.as_deref().is_none_or(str::is_empty)
+            {
+                return Err(AgentWorkflowError::InvalidState(format!(
+                    "side effect candidate `{candidate}` requires a potential side effect finding with evidence"
+                )));
+            }
+        }
+    }
+    Ok(())
+}
+
+fn validate_typed_judge_invariants(verdict: &JudgeVerdict) -> Result<(), AgentWorkflowError> {
+    if verdict.alignment == Alignment::Different
+        && !verdict.findings.iter().any(|finding| {
+            matches!(
+                finding.kind,
+                FindingCategory::MissingRequirements | FindingCategory::UnrequestedChanges
+            )
+        })
+    {
+        return Err(AgentWorkflowError::DifferentWithoutObjectiveMismatch);
+    }
+    Ok(())
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

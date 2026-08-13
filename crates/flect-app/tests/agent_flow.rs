@@ -126,7 +126,7 @@ fn accepts_structured_scope_and_exposes_judge_evidence_contract() {
         })
         .unwrap();
     let judge = service.prepare_reconciliation(&blind.job_id).unwrap();
-    assert_eq!(judge.evidence_ref_contract["version"], 3);
+    assert_eq!(judge.evidence_ref_contract["version"], 4);
     assert_eq!(
         judge.evidence_ref_contract["finding_fields"],
         serde_json::json!(["kind", "text", "evidence_ref"])
@@ -165,7 +165,7 @@ fn accepts_structured_scope_and_exposes_judge_evidence_contract() {
     assert!(
         judge
             .instructions
-            .contains("distinct downstream behavioral consequence")
+            .contains("Each verifier-reported side effect must be explicitly dispositioned")
     );
     assert_eq!(judge.evidence_ref_contract["files"][0]["file"], "app.txt");
     assert!(
@@ -333,14 +333,13 @@ fn side_effect_guidance_requires_a_distinct_consequence_without_duplication() {
         .unwrap()
         .iter()
         .map(|value| value.as_str().unwrap())
-        .find(|value| value.contains("distinct downstream consequence"))
+        .find(|value| value.contains("Every side_effect candidate"))
         .unwrap();
 
     // A base divergence alone remains only its base category.
     assert!(guidance.contains("distinct plausible externally observable impact"));
-    // A distinct consequence of either generic base divergence requires both categories.
-    assert!(rule.contains("unrequested change or violated constraint"));
-    assert!(rule.contains("emit both"));
+    // Verifier-reported consequences must receive a typed disposition.
+    assert!(rule.contains("dispositioned"));
     // Equivalent wording is not a separate downstream consequence.
     assert!(guidance.contains("do not treat one category as a substitute"));
     assert!(
@@ -422,6 +421,182 @@ fn side_effect_guidance_requires_a_distinct_consequence_without_duplication() {
         )
         .is_err()
     );
+}
+
+#[test]
+fn different_requires_an_objective_mismatch_finding() {
+    let repository = fixture_repository();
+    let workspace = tempfile::tempdir().unwrap();
+    let service = AgentService::with_workspace_root(
+        GitRepository::discover(repository.path()).unwrap(),
+        workspace.path().join("jobs"),
+    )
+    .unwrap();
+    let constraint = JudgeFinding {
+        kind: FindingCategory::ViolatedConstraints,
+        text: "Changes the public input type.".to_owned(),
+        evidence_ref: None,
+    };
+    let side_effect = JudgeFinding {
+        kind: FindingCategory::PotentialSideEffects,
+        text: "Callers must migrate to the new input type.".to_owned(),
+        evidence_ref: None,
+    };
+
+    let submit = |alignment: Alignment, finding: JudgeFinding| {
+        let blind = service.prepare_blind(None, None).unwrap();
+        service
+            .submit_echo(BlindAgentSubmission {
+                job_id: blind.job_id.clone(),
+                echoed_spec: EchoedSpec::default(),
+                model: None,
+                model_selection: AgentModelSelection::Unknown,
+            })
+            .unwrap();
+        let judge = service.prepare_reconciliation(&blind.job_id).unwrap();
+        service
+            .judge_begin(&judge.job_id, None, AgentModelSelection::Unknown)
+            .unwrap();
+        service
+            .judge_set_alignment(&judge.job_id, alignment)
+            .unwrap();
+        service
+            .judge_add_finding(
+                &judge.job_id,
+                finding.kind,
+                finding.text,
+                finding.evidence_ref,
+            )
+            .unwrap();
+        service.judge_set_confidence(&judge.job_id, 0.9).unwrap();
+        service.judge_submit(&judge.job_id)
+    };
+
+    // An objective-advancing implementation with a constraint break is PARTIAL.
+    assert!(submit(Alignment::Partial, constraint.clone()).is_ok());
+
+    // A constraint break or downstream effect alone does not establish objective mismatch.
+    for findings in [vec![constraint], vec![side_effect]] {
+        assert!(submit(Alignment::Different, findings.into_iter().next().unwrap()).is_err());
+    }
+
+    // Genuinely unrelated work is represented by an objective-mismatch category.
+    assert!(
+        submit(
+            Alignment::Different,
+            JudgeFinding {
+                kind: FindingCategory::UnrequestedChanges,
+                text: "Adds unrelated request logging instead of the requested behavior."
+                    .to_owned(),
+                evidence_ref: None,
+            },
+        )
+        .is_ok()
+    );
+}
+
+#[test]
+fn verifier_side_effects_require_a_typed_disposition() {
+    let repository = fixture_repository();
+    let workspace = tempfile::tempdir().unwrap();
+    let service = AgentService::with_workspace_root(
+        GitRepository::discover(repository.path()).unwrap(),
+        workspace.path().join("jobs"),
+    )
+    .unwrap();
+
+    let prepare = |service: &AgentService| {
+        let blind = service.prepare_blind(None, None).unwrap();
+        service
+            .submit_echo(BlindAgentSubmission {
+                job_id: blind.job_id.clone(),
+                echoed_spec: EchoedSpec {
+                    side_effects: vec!["Callers must migrate to the new input type.".to_owned()],
+                    ..EchoedSpec::default()
+                },
+                model: None,
+                model_selection: AgentModelSelection::Unknown,
+            })
+            .unwrap();
+        service.prepare_reconciliation(&blind.job_id).unwrap()
+    };
+
+    let undispositioned = prepare(&service);
+    assert_eq!(
+        undispositioned.evidence_ref_contract["side_effect_candidates"][0]["id"],
+        "side_effect/0"
+    );
+    service
+        .judge_begin(&undispositioned.job_id, None, AgentModelSelection::Unknown)
+        .unwrap();
+    service
+        .judge_set_alignment(&undispositioned.job_id, Alignment::Partial)
+        .unwrap();
+    service
+        .judge_add_finding(
+            &undispositioned.job_id,
+            FindingCategory::ViolatedConstraints,
+            "Changes the public input type.".to_owned(),
+            Some("hunk/0".to_owned()),
+        )
+        .unwrap();
+    service
+        .judge_set_confidence(&undispositioned.job_id, 0.9)
+        .unwrap();
+    assert!(service.judge_submit(&undispositioned.job_id).is_err());
+
+    let distinct = prepare(&service);
+    service
+        .judge_begin(&distinct.job_id, None, AgentModelSelection::Unknown)
+        .unwrap();
+    service
+        .judge_set_alignment(&distinct.job_id, Alignment::Partial)
+        .unwrap();
+    service
+        .judge_add_finding(
+            &distinct.job_id,
+            FindingCategory::ViolatedConstraints,
+            "Changes the public input type.".to_owned(),
+            Some("hunk/0".to_owned()),
+        )
+        .unwrap();
+    service
+        .judge_add_side_effect_finding(
+            &distinct.job_id,
+            "side_effect/0".to_owned(),
+            "Callers must migrate to the new input type.".to_owned(),
+            "hunk/0".to_owned(),
+        )
+        .unwrap();
+    service.judge_set_confidence(&distinct.job_id, 0.9).unwrap();
+    assert!(service.judge_submit(&distinct.job_id).is_ok());
+
+    let non_distinct = prepare(&service);
+    service
+        .judge_begin(&non_distinct.job_id, None, AgentModelSelection::Unknown)
+        .unwrap();
+    service
+        .judge_set_alignment(&non_distinct.job_id, Alignment::Partial)
+        .unwrap();
+    service
+        .judge_add_finding(
+            &non_distinct.job_id,
+            FindingCategory::ViolatedConstraints,
+            "Changes the public input type.".to_owned(),
+            Some("hunk/0".to_owned()),
+        )
+        .unwrap();
+    service
+        .judge_mark_side_effect_not_distinct(
+            &non_distinct.job_id,
+            "side_effect/0".to_owned(),
+            "This only restates the public API change.".to_owned(),
+        )
+        .unwrap();
+    service
+        .judge_set_confidence(&non_distinct.job_id, 0.9)
+        .unwrap();
+    assert!(service.judge_submit(&non_distinct.job_id).is_ok());
 }
 
 #[test]
