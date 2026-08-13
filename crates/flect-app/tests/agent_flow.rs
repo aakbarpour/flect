@@ -130,7 +130,7 @@ fn accepts_structured_scope_and_exposes_judge_evidence_contract() {
         judge.evidence_contract["finding_kind_guidance"]["potential_side_effect"]
             .as_str()
             .unwrap()
-            .contains("alongside")
+            .contains("separately described consequence")
     );
     assert!(
         judge.evidence_contract["alignment_meanings"]["DIFFERENT"]

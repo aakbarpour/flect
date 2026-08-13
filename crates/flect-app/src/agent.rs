@@ -548,7 +548,7 @@ fn evidence_contract(bundle: &BlindBundle) -> Value {
             "missing_requirement": "A requested requirement or acceptance condition is absent or not met.",
             "unrequested_change": "The patch adds, broadens, or changes behavior outside the objective, requirements, expected scope, or non-goals, even when the requested behavior is also present.",
             "violated_constraint": "The patch conflicts with an explicit constraint or task boundary.",
-            "potential_side_effect": "A distinct plausible externally observable impact of an added, broadened, or constraint-violating behavior. Emit it alongside the underlying unrequested change or violated constraint when both facts are supported; do not treat one category as a substitute for the other."
+            "potential_side_effect": "A distinct plausible externally observable impact of an added, broadened, or constraint-violating behavior. When a supported unrequested change or violated constraint has a separately described consequence in EchoedSpec behavior_after or side_effects, emit both findings with the same evidence reference; do not treat one category as a substitute for the other."
         },
         "rules": [
             "Return the verdict_schema object directly; do not add a verdict wrapper.",
@@ -556,6 +556,7 @@ fn evidence_contract(bundle: &BlindBundle) -> Value {
             "Each finding has kind, text, and optional evidence_ref. evidence_ref, when present, must equal one listed stable hunk ID.",
             "SAME requires findings to be empty; PARTIAL and DIFFERENT require at least one finding.",
             "Do not return SAME merely because a requested change is present; SAME requires no supported divergence from the full IntendedSpec.",
+            "Before finalizing a non-SAME verdict, check whether each supported unrequested change or violated constraint has a distinct consequence described by EchoedSpec; classify that consequence as potential_side_effect when it is externally observable.",
             "confidence is required and must be a number from 0 through 1."
         ],
         "finding_example": files.iter().find_map(|file| file["hunks"].as_array().and_then(|hunks| hunks.first()).map(|hunk| serde_json::json!({"kind": "violated_constraint", "text": "The changed setting violates the constraint.", "evidence_ref": hunk["hunk_id"]}))),
