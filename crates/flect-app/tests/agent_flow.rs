@@ -133,6 +133,12 @@ fn accepts_structured_scope_and_exposes_judge_evidence_contract() {
             .contains("alongside")
     );
     assert!(
+        judge.evidence_contract["alignment_meanings"]["DIFFERENT"]
+            .as_str()
+            .unwrap()
+            .contains("do not use DIFFERENT solely")
+    );
+    assert!(
         judge.evidence_contract["rules"]
             .as_array()
             .unwrap()

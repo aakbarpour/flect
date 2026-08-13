@@ -17,7 +17,7 @@ use thiserror::Error;
 use crate::{EvidenceError, materialize_judge_verdict};
 
 const VERIFIER_INSTRUCTIONS: &str = "You are the blind Flect verifier. You have not been given the original task. Do not attempt to discover it. Inspect only the supplied sanitized patch evidence. Determine what behavior this patch appears to add, remove, or change. Return only a valid EchoedSpec matching the supplied schema. Each affected_scope entry is an object: file must exactly equal a path in the supplied manifest; symbol is optional descriptive function, class, or region detail and is not a path. Do not perform general style review. Do not invent files, lines, requirements, or motivations. Preserve uncertainty.";
-const JUDGE_INSTRUCTIONS: &str = "You are the Flect reconciliation judge. Return JSON only: one object matching verdict_schema, with no wrapper, prose, Markdown, or extra keys. Compare IntendedSpec with EchoedSpec for complete alignment, not merely whether a requested change is present: surface scope creep, unrelated behavior, added functionality, and task-boundary violations. Make only the smallest semantic judgment: alignment, findings, and confidence. Each finding has kind, text, and optional evidence_ref. Use only kind values and evidence_ref values listed in evidence_contract. Never emit actions, IDs, files, patch text, line ranges, summaries, or uncertainties. SAME must have zero findings; PARTIAL and DIFFERENT must have at least one finding. Flect derives the trusted persisted Verdict.";
+const JUDGE_INSTRUCTIONS: &str = "You are the Flect reconciliation judge. Return JSON only: one object matching verdict_schema, with no wrapper, prose, Markdown, or extra keys. Compare IntendedSpec with EchoedSpec for complete alignment, not merely whether a requested change is present: surface scope creep, unrelated behavior, added functionality, and task-boundary violations. When the patch advances a requested objective or requirement but has a missing requirement, constraint violation, or divergence, use PARTIAL; reserve DIFFERENT for behavior that is materially unrelated to or contradictory with the requested work. Make only the smallest semantic judgment: alignment, findings, and confidence. Each finding has kind, text, and optional evidence_ref. Use only kind values and evidence_ref values listed in evidence_contract. Never emit actions, IDs, files, patch text, line ranges, summaries, or uncertainties. SAME must have zero findings; PARTIAL and DIFFERENT must have at least one finding. Flect derives the trusted persisted Verdict.";
 static JOB_SEQUENCE: AtomicU64 = AtomicU64::new(0);
 
 #[derive(Debug, Error)]
@@ -540,8 +540,8 @@ fn evidence_contract(bundle: &BlindBundle) -> Value {
         ],
         "alignment_meanings": {
             "SAME": "The apparent behavior fulfills the intended objective and material requirements without divergence.",
-            "PARTIAL": "The apparent behavior advances the intended objective but has a missing requirement, violated constraint, or scope divergence.",
-            "DIFFERENT": "The apparent behavior is materially contradictory to or replaces a required behavior, even if a superficial part of the objective changes.",
+            "PARTIAL": "The apparent behavior advances at least one requested objective or requirement but has a missing requirement, violated constraint, added behavior, or scope divergence.",
+            "DIFFERENT": "The apparent behavior is materially unrelated to or contradictory with the requested work; do not use DIFFERENT solely because an otherwise goal-advancing patch violates a constraint.",
             "UNCERTAIN": "The supplied IntendedSpec and EchoedSpec are insufficient for a semantic judgment."
         },
         "finding_kind_guidance": {
