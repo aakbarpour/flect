@@ -147,6 +147,7 @@ fn config_commands_set_and_show_validated_runner_values() {
 }
 
 #[test]
+#[allow(clippy::too_many_lines)]
 fn direct_judge_submission_is_strict_and_does_not_use_chat_text() {
     let repository = tempfile::tempdir().unwrap();
     git(repository.path(), ["init", "-b", "main"]);
@@ -202,51 +203,66 @@ fn direct_judge_submission_is_strict_and_does_not_use_chat_text() {
     assert_success(&judge);
     let judge: serde_json::Value = serde_json::from_slice(&judge.stdout).unwrap();
     let judge_job_id = judge["job_id"].as_str().unwrap();
-    let submission = Path::new(judge["submission_file"].as_str().unwrap());
-
-    let verdict = format!(
-        r#"{{"job_id":"{judge_job_id}","verdict":{{"alignment":"SAME","findings":[],"confidence":0.9}},"model":"gpt-5.6-terra","model_selection":"explicit"}}"#
+    assert!(judge.get("submission_file").is_none());
+    assert_success(flect(
+        repository.path(),
+        [
+            "--json",
+            "agent",
+            "judge-begin",
+            "--job",
+            judge_job_id,
+            "--model",
+            "gpt-5.6-terra",
+            "--model-selection",
+            "explicit",
+        ],
+    ));
+    let invalid_kind = flect(
+        repository.path(),
+        [
+            "--json",
+            "agent",
+            "judge-add-finding",
+            "--job",
+            judge_job_id,
+            "--kind",
+            "structural",
+            "--text-file",
+            "missing.txt",
+        ],
     );
-    fs::write(submission, format!("```json\n{verdict}\n```\n")).unwrap();
-    let fenced = submit_verdict(repository.path(), submission);
-    assert!(!fenced.status.success());
-    assert_eq!(
-        fs::read_to_string(submission).unwrap(),
-        format!("```json\n{verdict}\n```\n")
+    assert!(!invalid_kind.status.success());
+    assert_success(flect(
+        repository.path(),
+        [
+            "--json",
+            "agent",
+            "judge-set-alignment",
+            "--job",
+            judge_job_id,
+            "same",
+        ],
+    ));
+    assert_success(flect(
+        repository.path(),
+        [
+            "--json",
+            "agent",
+            "judge-set-confidence",
+            "--job",
+            judge_job_id,
+            "0.9",
+        ],
+    ));
+    assert_success(flect(
+        repository.path(),
+        ["--json", "agent", "judge-submit", "--job", judge_job_id],
+    ));
+    let reused = flect(
+        repository.path(),
+        ["--json", "agent", "judge-submit", "--job", judge_job_id],
     );
-
-    let extra = format!(
-        r#"{{"job_id":"{judge_job_id}","verdict":{{"alignment":"SAME","findings":[],"confidence":0.9}},"model":"gpt-5.6-terra","model_selection":"explicit","extra":true}}"#
-    );
-    fs::write(submission, extra).unwrap();
-    let extra_key = submit_verdict(repository.path(), submission);
-    assert!(!extra_key.status.success());
-
-    let mismatched = r#"{"job_id":"judge_not_the_prepared_job","verdict":{"alignment":"SAME","findings":[],"confidence":0.9},"model":"gpt-5.6-terra","model_selection":"explicit"}"#;
-    fs::write(submission, mismatched).unwrap();
-    let mismatched = submit_verdict(repository.path(), submission);
-    assert!(!mismatched.status.success());
-
-    let fabricated = format!(
-        r#"{{"job_id":"{judge_job_id}","verdict":{{"alignment":"PARTIAL","findings":[{{"kind":"missing_requirement","text":"Missing","evidence_ref":"hunk/999"}}],"confidence":0.9}},"model":"gpt-5.6-terra","model_selection":"explicit"}}"#
-    );
-    fs::write(submission, fabricated).unwrap();
-    let fabricated = submit_verdict(repository.path(), submission);
-    assert!(!fabricated.status.success());
-
-    fs::write(submission, &verdict).unwrap();
-    let substituted = directory.path().join("substituted").join(
-        submission
-            .file_name()
-            .expect("Flect-generated submission file has a name"),
-    );
-    fs::create_dir_all(substituted.parent().unwrap()).unwrap();
-    fs::write(&substituted, &verdict).unwrap();
-    let substituted = submit_verdict(repository.path(), &substituted);
-    assert!(!substituted.status.success());
-    let accepted = submit_verdict(repository.path(), submission);
-    assert_success(&accepted);
-    let reused = submit_verdict(repository.path(), submission);
     assert!(!reused.status.success());
 }
 
@@ -254,15 +270,6 @@ fn flect<const N: usize>(directory: &Path, arguments: [&str; N]) -> Output {
     Command::new(env!("CARGO_BIN_EXE_flect"))
         .current_dir(directory)
         .args(arguments)
-        .output()
-        .unwrap()
-}
-
-fn submit_verdict(directory: &Path, submission: &Path) -> Output {
-    Command::new(env!("CARGO_BIN_EXE_flect"))
-        .current_dir(directory)
-        .args(["--json", "agent", "submit-verdict", "--submission-file"])
-        .arg(submission)
         .output()
         .unwrap()
 }

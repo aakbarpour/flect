@@ -32,7 +32,7 @@ Both flags are required so paid execution cannot happen implicitly. Each case ma
 
 The blind verifier receives only the candidate patch, focused base context, manifest, and blindness report. It does **not** receive the original task, conversation, intended/forward spec, branch, commit message, or primary-agent reasoning. The judge receives the independently generated forward spec and blind reconstruction. Repository fixture code is data and is never executed.
 
-The HTTP profile workflow is model-backed but is **not Codex-native**. A result may be called “Codex-native” only when the execution environment actually provides fresh Codex verifier and judge agents through the trusted `prepare-blind` / `submit-echo` / `prepare-reconciliation` / `submit-verdict` lifecycle and the retained run artifact establishes that fact. Do not relabel an HTTP run or substitute it when that runtime capability is unavailable.
+The HTTP profile workflow is model-backed but is **not Codex-native**. A result may be called “Codex-native” only when the execution environment actually provides fresh Codex verifier and judge agents through the trusted `prepare-blind` / `submit-echo` / `prepare-reconciliation` / typed judge lifecycle and the retained run artifact establishes that fact. Do not relabel an HTTP run or substitute it when that runtime capability is unavailable.
 
 ## Metrics and failures
 

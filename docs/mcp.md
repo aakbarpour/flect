@@ -12,7 +12,7 @@ codex mcp add flect -- C:\path\to\flect\target\release\flect.exe mcp
 codex mcp list
 ```
 
-Restart or reconnect the Codex task after registration, then use the MCP tool picker (or `/mcp`) to confirm that `flect_start`, `flect_prepare_blind`, `flect_submit_echo`, `flect_prepare_reconciliation`, and `flect_submit_verdict` are callable. `flect mcp` being available in `flect doctor` only confirms the server binary; it does not register the server with the running Codex task.
+Restart or reconnect the Codex task after registration, then use the MCP tool picker (or `/mcp`) to confirm that `flect_start`, `flect_prepare_blind`, `flect_submit_echo`, `flect_prepare_reconciliation`, and the `flect_judge_*` tools are callable. `flect mcp` being available in `flect doctor` only confirms the server binary; it does not register the server with the running Codex task.
 
 On macOS or Linux, use the corresponding `target/release/flect` path. Codex stores MCP configuration in `~/.codex/config.toml`. A trusted repository may instead carry project-scoped configuration in `.codex/config.toml`:
 
@@ -33,8 +33,8 @@ The `cwd` must be the Git worktree Flect should inspect. Environment variables r
 - `flect_verify` reconstructs, reconciles, and persists a structured verdict.
 - `flect_prepare_blind` creates sanitized read-only resources and a typed fresh-verifier job.
 - `flect_submit_echo` validates and accepts one typed verifier response.
-- `flect_prepare_reconciliation` creates the contract and Flect-owned direct-submission file for a different fresh judge.
-- `flect_submit_verdict` accepts only the contract's designated opaque `submission_file`, validates its contents, closes the judge job, and persists the result. The fresh child writes that file but never calls Flect or writes `.flect/` state; a trusted parent submits only the path and never parses the file or judge chat response.
+- `flect_prepare_reconciliation` creates the contract for a different fresh judge.
+- The fresh judge itself calls `flect_judge_begin`, `flect_judge_set_alignment`, zero or more `flect_judge_add_finding`, `flect_judge_set_confidence`, and `flect_judge_submit`. Flect binds the job and lifecycle, constructs the `JudgeVerdict` and submission envelope internally, validates evidence, and persists the result. No judge-authored JSON or free-form chat is parsed.
 - `flect_get_result` retrieves that persisted result.
 
 State-changing tools write only Flect's project-local `.flect/` state and prepared agent resources under the operating-system temporary directory. Flect's Git access remains read-only. The MCP process writes protocol messages to stdout and diagnostics to stderr.

@@ -10,9 +10,9 @@ The verifier returns one JSON object matching `echoed_spec_schema`. Each `affect
 
 ## Judge spawn
 
-After Flect accepts the echo, prepare a reconciliation job and spawn a different fresh child. The judge may receive the job's IntendedSpec, EchoedSpec, available evidence, `evidence_contract`, instructions, judge schema, submission file, and submission schema. It must not receive the parent conversation or implementation reasoning. It writes exactly one `ReconciliationAgentSubmission` containing `alignment`, `findings[{kind,text,evidence_ref}]`, and `confidence` to Flect's generated `submission_file`, then stops. The trusted orchestrator later invokes `flect agent submit-verdict --submission-file <submission_file>` or `flect_submit_verdict` using only that opaque Flect-generated path. The orchestrator must never read or parse the file, nor copy or parse judge chat. Flect derives persisted finding IDs, files, exact hunks, line ranges, and the recommended action; `SAME` has no findings.
+After Flect accepts the echo, prepare a reconciliation job and spawn a different fresh child. The judge may receive the job's IntendedSpec, EchoedSpec, available evidence, `evidence_ref_contract`, and instructions. It must not receive the parent conversation or implementation reasoning. It invokes `judge-begin`, `judge-set-alignment`, repeated `judge-add-finding --text-file`, `judge-set-confidence`, and `judge-submit` itself. It provides only alignment, confidence, and findings (`kind`, text, optional `evidence_ref`). The parent only observes completion and never translates semantic output. Flect derives the submission envelope, persisted finding IDs, files, exact hunks, line ranges, and recommended action; `SAME` has no findings.
 
-Flect strictly parses the direct submission. Markdown fences, prose, JSON wrappers, unknown keys, fabricated evidence, mismatched job IDs, and reused jobs are rejected. Do not persist or act on an unvalidated verdict.
+No judge-authored JSON or chat is parsed. Unknown categories are rejected by the typed command surface; fabricated evidence, invalid lifecycle use, and semantic invariant failures are rejected by Flect.
 
 ## Repair
 

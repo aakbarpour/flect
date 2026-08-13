@@ -190,7 +190,7 @@ Completed Codex-native handoffs persist the verification record and then remove 
 
 ## Codex MCP
 
-`flect mcp` exposes the automated tools plus `flect_prepare_blind`, `flect_submit_echo`, `flect_prepare_reconciliation`, and `flect_submit_verdict`. Agent handoff tools call the shared `flect-app` service directly; all modes converge on the same domain records and project-local state. See [Codex MCP integration](docs/mcp.md) for lifecycle, errors, and `.codex/config.toml` setup.
+`flect mcp` exposes the automated tools plus `flect_prepare_blind`, `flect_submit_echo`, `flect_prepare_reconciliation`, and the typed `flect_judge_*` lifecycle. Agent handoff tools call the shared `flect-app` service directly; all modes converge on the same domain records and project-local state. See [Codex MCP integration](docs/mcp.md) for lifecycle, errors, and `.codex/config.toml` setup.
 
 ## Evaluation
 

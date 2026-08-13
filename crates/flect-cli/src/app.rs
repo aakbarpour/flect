@@ -472,11 +472,45 @@ fn agent(command: &AgentCommand, _json_output: bool) -> Result<()> {
                 .prepare_reconciliation(blind_job)
                 .map_err(to_report)?,
         ),
-        AgentCommand::SubmitVerdict { submission_file } => serde_json::to_value(
+        AgentCommand::JudgeBegin {
+            job,
+            model,
+            model_selection,
+        } => {
             service
-                .submit_verdict_file(submission_file)
-                .map_err(to_report)?,
-        ),
+                .judge_begin(job, model.clone(), (*model_selection).into())
+                .map_err(to_report)?;
+            Ok(json!({"job_id": job, "status": "collecting"}))
+        }
+        AgentCommand::JudgeSetAlignment { job, alignment } => {
+            service
+                .judge_set_alignment(job, (*alignment).into())
+                .map_err(to_report)?;
+            Ok(json!({"job_id": job, "status": "collecting"}))
+        }
+        AgentCommand::JudgeAddFinding {
+            job,
+            kind,
+            text_file,
+            evidence_ref,
+        } => {
+            let text = fs::read_to_string(text_file)
+                .into_diagnostic()
+                .wrap_err("could not read judge finding text")?;
+            service
+                .judge_add_finding(job, (*kind).into(), text, evidence_ref.clone())
+                .map_err(to_report)?;
+            Ok(json!({"job_id": job, "status": "collecting"}))
+        }
+        AgentCommand::JudgeSetConfidence { job, confidence } => {
+            service
+                .judge_set_confidence(job, *confidence)
+                .map_err(to_report)?;
+            Ok(json!({"job_id": job, "status": "collecting"}))
+        }
+        AgentCommand::JudgeSubmit { job } => {
+            serde_json::to_value(service.judge_submit(job).map_err(to_report)?)
+        }
         AgentCommand::Cleanup {
             dry_run,
             all,

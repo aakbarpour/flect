@@ -5,9 +5,10 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use flect_core::{
-    BlindAgentJob, BlindAgentSubmission, BlindBundle, BlindGuard, Config, ContextBuilder,
-    ContextPolicy, EchoedSpec, GitRepository, IsolationLevel, ModelCallRecord,
-    ReconciliationAgentJob, ReconciliationAgentSubmission, RunStore, VerificationRecord,
+    AgentModelSelection, Alignment, BlindAgentJob, BlindAgentSubmission, BlindBundle, BlindGuard,
+    Config, ContextBuilder, ContextPolicy, EchoedSpec, FindingCategory, GitRepository,
+    IsolationLevel, JudgeFinding, JudgeVerdict, ModelCallRecord, ReconciliationAgentJob, RunStore,
+    VerificationRecord,
 };
 use schemars::{JsonSchema, schema_for};
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
@@ -17,7 +18,7 @@ use thiserror::Error;
 use crate::{EvidenceError, materialize_judge_verdict};
 
 const VERIFIER_INSTRUCTIONS: &str = "You are the blind Flect verifier. You have not been given the original task. Do not attempt to discover it. Inspect only the supplied sanitized patch evidence. Determine what behavior this patch appears to add, remove, or change. Return only a valid EchoedSpec matching the supplied schema. Each affected_scope entry is an object: file must exactly equal a path in the supplied manifest; symbol is optional descriptive function, class, or region detail and is not a path. Do not perform general style review. Do not invent files, lines, requirements, or motivations. Preserve uncertainty.";
-const JUDGE_INSTRUCTIONS: &str = "You are the Flect reconciliation judge. Write exactly one ReconciliationAgentSubmission matching submission_schema to submission_file, then stop. Do not use chat text as the protocol payload, invoke Flect commands, or persist Flect state; a trusted orchestrator will submit only this designated opaque file after you finish. Do not wrap JSON in Markdown, prose, or another object. submission_schema is the only output schema. Each finding may contain only kind, text, and optional evidence_ref. evidence, file, line, patch_hunk, finding_id, and all other persisted evidence fields are forbidden. Use only evidence_ref IDs in evidence_ref_contract. Compare IntendedSpec with EchoedSpec for complete alignment, not merely whether a requested change is present: surface scope creep, unrelated behavior, added functionality, and task-boundary violations. When the patch advances a requested objective or requirement but has a missing requirement, constraint violation, or divergence, use PARTIAL; reserve DIFFERENT for behavior that is materially unrelated to or contradictory with the requested work. SAME must have zero findings; PARTIAL and DIFFERENT must have at least one finding. Flect derives the trusted persisted Verdict.";
+const JUDGE_INSTRUCTIONS: &str = "You are the Flect reconciliation judge. Do not write JSON and do not use chat text as the protocol payload. Invoke the typed Flect lifecycle yourself: `flect agent judge-begin --job <job>`, `judge-set-alignment --job <job> <SAME|PARTIAL|DIFFERENT|UNCERTAIN>`, zero or more `judge-add-finding --job <job> --kind <kind> --text-file <path> [--evidence-ref <hunk/id>]`, `judge-set-confidence --job <job> <0..1>`, then `judge-submit --job <job>`. Flect owns the job binding, envelope, serialization, evidence materialization, and persistence. Use only evidence_ref IDs in evidence_ref_contract. Compare IntendedSpec with EchoedSpec for complete alignment, not merely whether a requested change is present: surface scope creep, unrelated behavior, added functionality, and task-boundary violations. SAME must have zero findings; PARTIAL and DIFFERENT must have at least one finding.";
 static JOB_SEQUENCE: AtomicU64 = AtomicU64::new(0);
 
 #[derive(Debug, Error)]
@@ -262,7 +263,6 @@ impl AgentService {
             .load_run(Some(&blind.job.run_id))
             .map_err(|error| AgentWorkflowError::RunState(error.to_string()))?;
         let job_id = generate_id("judge", &blind.job.run_id)?;
-        let submission_file = self.create_reconciliation_submission_file(&job_id)?;
         let job = ReconciliationAgentJob {
             version: 1,
             job_id,
@@ -272,8 +272,6 @@ impl AgentService {
             intended_spec: run.intended_spec,
             echoed_spec,
             evidence_ref_contract: evidence_ref_contract(&blind.job.bundle),
-            submission_file: submission_file.display().to_string(),
-            submission_schema: strict_schema::<ReconciliationAgentSubmission>()?,
         };
         self.save_reconciliation_state(&ReconciliationState {
             version: 1,
@@ -282,36 +280,108 @@ impl AgentService {
             bundle: blind.job.bundle,
             blind_model: blind.model,
             blind_model_selection: blind.model_selection,
+            draft: None,
         })?;
         Ok(job)
     }
 
-    /// Reads only the prepared opaque submission file, then validates and persists its verdict.
+    /// Starts a Flect-owned typed judge submission. No judge-authored JSON is accepted.
     ///
     /// # Errors
     ///
-    /// Returns an error for invalid lifecycle, fabricated evidence, or persistence failure.
-    pub fn submit_verdict_file(
+    /// Returns an error when the job is missing or not prepared.
+    pub fn judge_begin(
         &self,
-        submission_file: &Path,
-    ) -> Result<VerificationRecord, AgentWorkflowError> {
-        let (job_id, submission_file) = self.prepared_submission_file(submission_file)?;
-        let submission: ReconciliationAgentSubmission = read_state(&submission_file, &job_id)?;
-        self.submit_verdict(submission)
+        job_id: &str,
+        model: Option<String>,
+        model_selection: AgentModelSelection,
+    ) -> Result<(), AgentWorkflowError> {
+        let mut state = self.load_reconciliation_state(job_id)?;
+        if state.status != ReconciliationStatus::Prepared || state.job.job_id != job_id {
+            return Err(AgentWorkflowError::InvalidJobState(job_id.to_owned()));
+        }
+        state.status = ReconciliationStatus::Collecting;
+        state.draft = Some(JudgeDraft {
+            alignment: None,
+            confidence: None,
+            findings: Vec::new(),
+            model,
+            model_selection,
+        });
+        self.save_reconciliation_state(&state)
     }
 
-    fn submit_verdict(
+    /// Sets alignment on an active typed judge submission.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the job is missing or not collecting.
+    pub fn judge_set_alignment(
         &self,
-        submission: ReconciliationAgentSubmission,
-    ) -> Result<VerificationRecord, AgentWorkflowError> {
-        let mut state = self.load_reconciliation_state(&submission.job_id)?;
-        if state.status != ReconciliationStatus::Prepared {
-            return Err(AgentWorkflowError::InvalidJobState(submission.job_id));
+        job_id: &str,
+        alignment: Alignment,
+    ) -> Result<(), AgentWorkflowError> {
+        self.with_judge_draft(job_id, |draft| draft.alignment = Some(alignment))
+    }
+
+    /// Adds one semantic finding to an active typed judge submission.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the job is missing or not collecting.
+    pub fn judge_add_finding(
+        &self,
+        job_id: &str,
+        kind: FindingCategory,
+        text: String,
+        evidence_ref: Option<String>,
+    ) -> Result<(), AgentWorkflowError> {
+        self.with_judge_draft(job_id, |draft| {
+            draft.findings.push(JudgeFinding {
+                kind,
+                text,
+                evidence_ref,
+            });
+        })
+    }
+
+    /// Sets confidence on an active typed judge submission.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the job is missing or not collecting.
+    pub fn judge_set_confidence(
+        &self,
+        job_id: &str,
+        confidence: f64,
+    ) -> Result<(), AgentWorkflowError> {
+        self.with_judge_draft(job_id, |draft| draft.confidence = Some(confidence))
+    }
+
+    /// Validates Flect-owned typed semantic state, constructs the domain verdict, and persists it.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error for incomplete state, invalid semantics, invalid evidence, or persistence failure.
+    pub fn judge_submit(&self, job_id: &str) -> Result<VerificationRecord, AgentWorkflowError> {
+        let mut state = self.load_reconciliation_state(job_id)?;
+        if state.status != ReconciliationStatus::Collecting || state.job.job_id != job_id {
+            return Err(AgentWorkflowError::InvalidJobState(job_id.to_owned()));
         }
-        if state.job.job_id != submission.job_id {
-            return Err(AgentWorkflowError::JobMismatch(state.job.job_id));
-        }
-        let verdict = materialize_judge_verdict(submission.verdict, &state.bundle)?;
+        let draft = state
+            .draft
+            .clone()
+            .ok_or_else(|| AgentWorkflowError::InvalidJobState(job_id.to_owned()))?;
+        let verdict = JudgeVerdict {
+            alignment: draft.alignment.ok_or_else(|| {
+                AgentWorkflowError::InvalidState("judge alignment was not set".to_owned())
+            })?,
+            findings: draft.findings,
+            confidence: draft.confidence.ok_or_else(|| {
+                AgentWorkflowError::InvalidState("judge confidence was not set".to_owned())
+            })?,
+        };
+        let verdict = materialize_judge_verdict(verdict, &state.bundle)?;
         let record = VerificationRecord {
             version: 1,
             run_id: state.job.run_id.clone(),
@@ -325,11 +395,7 @@ impl AgentService {
                     state.blind_model.clone(),
                     state.blind_model_selection,
                 ),
-                agent_call(
-                    "reconciliation",
-                    submission.model.clone(),
-                    submission.model_selection,
-                ),
+                agent_call("reconciliation", draft.model.clone(), draft.model_selection),
             ],
             verified_unix_ms: unix_millis()?,
         };
@@ -343,44 +409,25 @@ impl AgentService {
         self.save_blind_state(&blind)?;
         if self.cleanup_on_complete {
             self.remove_owned_workspace(&blind.job.job_id)?;
-            self.remove_reconciliation_submission_file(&state.job.job_id)?;
         }
         Ok(record)
     }
 
-    fn prepared_submission_file(
+    fn with_judge_draft(
         &self,
-        submission_file: &Path,
-    ) -> Result<(String, PathBuf), AgentWorkflowError> {
-        let workspace_root = canonical_existing(&self.workspace_root)?;
-        let directory = workspace_root.join("reconciliation-submissions");
-        if !directory.exists() {
-            return Err(AgentWorkflowError::UnsafeWorkspace);
+        job_id: &str,
+        update: impl FnOnce(&mut JudgeDraft),
+    ) -> Result<(), AgentWorkflowError> {
+        let mut state = self.load_reconciliation_state(job_id)?;
+        if state.status != ReconciliationStatus::Collecting || state.job.job_id != job_id {
+            return Err(AgentWorkflowError::InvalidJobState(job_id.to_owned()));
         }
-        let directory = canonical_existing(&directory)?;
-        if !directory.starts_with(&workspace_root)
-            || directory.parent() != Some(workspace_root.as_path())
-        {
-            return Err(AgentWorkflowError::UnsafeWorkspace);
-        }
-        let canonical = canonical_existing(submission_file)?;
-        let job_id = canonical
-            .file_stem()
-            .and_then(|name| name.to_str())
-            .ok_or(AgentWorkflowError::UnsafeWorkspace)?
-            .to_owned();
-        validate_job_id(&job_id)?;
-        if canonical.parent() != Some(directory.as_path())
-            || canonical.extension().and_then(|value| value.to_str()) != Some("json")
-        {
-            return Err(AgentWorkflowError::SubmissionFileMismatch(job_id));
-        }
-        let state = self.load_reconciliation_state(&job_id)?;
-        let expected = canonical_existing(Path::new(&state.job.submission_file))?;
-        if canonical != expected {
-            return Err(AgentWorkflowError::SubmissionFileMismatch(job_id));
-        }
-        Ok((job_id, canonical))
+        let draft = state
+            .draft
+            .as_mut()
+            .ok_or_else(|| AgentWorkflowError::InvalidJobState(job_id.to_owned()))?;
+        update(draft);
+        self.save_reconciliation_state(&state)
     }
 
     /// Removes only verified Flect-owned job directories.
@@ -493,65 +540,6 @@ impl AgentService {
             write_json_readonly(&context_directory.join(format!("{index:04}.json")), context)?;
         }
         Ok(workspace)
-    }
-
-    fn create_reconciliation_submission_file(
-        &self,
-        job_id: &str,
-    ) -> Result<PathBuf, AgentWorkflowError> {
-        validate_job_id(job_id)?;
-        fs::create_dir_all(&self.workspace_root)
-            .map_err(|source| workspace_error(&self.workspace_root, source))?;
-        let repository_root = canonical_existing(self.repository.root())?;
-        let workspace_root = canonical_existing(&self.workspace_root)?;
-        if workspace_root.starts_with(repository_root) {
-            return Err(AgentWorkflowError::UnsafeWorkspace);
-        }
-        let directory = workspace_root.join("reconciliation-submissions");
-        fs::create_dir_all(&directory).map_err(|source| workspace_error(&directory, source))?;
-        let directory = canonical_existing(&directory)?;
-        if !directory.starts_with(&workspace_root) {
-            return Err(AgentWorkflowError::UnsafeWorkspace);
-        }
-        let path = directory.join(format!("{job_id}.json"));
-        fs::OpenOptions::new()
-            .create_new(true)
-            .write(true)
-            .open(&path)
-            .map_err(|source| workspace_error(&path, source))?;
-        Ok(path)
-    }
-
-    fn remove_reconciliation_submission_file(
-        &self,
-        job_id: &str,
-    ) -> Result<bool, AgentWorkflowError> {
-        validate_job_id(job_id)?;
-        let workspace_root = canonical_existing(&self.workspace_root)?;
-        let directory = workspace_root.join("reconciliation-submissions");
-        if !directory.exists() {
-            return Ok(false);
-        }
-        let directory = canonical_existing(&directory)?;
-        if !directory.starts_with(&workspace_root)
-            || directory.parent() != Some(workspace_root.as_path())
-        {
-            return Err(AgentWorkflowError::UnsafeCleanup(
-                directory.display().to_string(),
-            ));
-        }
-        let path = directory.join(format!("{job_id}.json"));
-        if !path.exists() {
-            return Ok(false);
-        }
-        let canonical = canonical_existing(&path)?;
-        if canonical != path || canonical.parent() != Some(directory.as_path()) {
-            return Err(AgentWorkflowError::UnsafeCleanup(
-                path.display().to_string(),
-            ));
-        }
-        fs::remove_file(&canonical).map_err(|source| workspace_error(&canonical, source))?;
-        Ok(true)
     }
 
     fn blind_state_path(&self, job_id: &str) -> Result<PathBuf, AgentWorkflowError> {
@@ -712,12 +700,23 @@ struct ReconciliationState {
     bundle: BlindBundle,
     blind_model: Option<String>,
     blind_model_selection: flect_core::AgentModelSelection,
+    draft: Option<JudgeDraft>,
+}
+
+#[derive(Clone, Serialize, Deserialize)]
+struct JudgeDraft {
+    alignment: Option<Alignment>,
+    confidence: Option<f64>,
+    findings: Vec<JudgeFinding>,
+    model: Option<String>,
+    model_selection: AgentModelSelection,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 enum ReconciliationStatus {
     Prepared,
+    Collecting,
     Completed,
     Failed,
     Abandoned,

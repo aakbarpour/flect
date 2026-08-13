@@ -462,16 +462,8 @@ pub struct ReconciliationAgentJob {
     pub echoed_spec: EchoedSpec,
     /// Machine-readable, fail-closed stable patch references for judge findings.
     ///
-    /// This is reference material, not a judge-output schema. The only schema
-    /// emitted for judge output is `submission_schema` below.
+    /// This is reference material for Flect's typed judge command lifecycle.
     pub evidence_ref_contract: serde_json::Value,
-    /// Flect-owned writable file that a fresh judge must populate with one exact
-    /// `ReconciliationAgentSubmission`; a trusted orchestrator later submits only
-    /// this opaque path to `flect agent submit-verdict --submission-file`.
-    pub submission_file: String,
-    /// The sole strict schema emitted for judge output. It deliberately wraps the
-    /// untrusted verdict with its lifecycle and model metadata.
-    pub submission_schema: serde_json::Value,
 }
 
 /// Typed response submitted by a reconciliation reasoner.

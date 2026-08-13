@@ -8,8 +8,8 @@ mod skill;
 
 use std::path::PathBuf;
 
-use clap::{ArgAction, Parser, Subcommand};
-use flect_core::ContextPolicy;
+use clap::{ArgAction, Parser, Subcommand, ValueEnum};
+use flect_core::{Alignment, ContextPolicy, FindingCategory};
 use miette::Result;
 
 #[derive(Debug, Parser)]
@@ -160,10 +160,43 @@ enum AgentCommand {
         #[arg(long)]
         blind_job: String,
     },
-    /// Read the designated opaque judge submission file, then validate and persist it.
-    SubmitVerdict {
+    /// Begin a typed judge submission owned by Flect.
+    JudgeBegin {
+        #[arg(long)]
+        job: String,
+        #[arg(long)]
+        model: Option<String>,
+        #[arg(long, value_enum, default_value_t = ModelSelectionArg::Unknown)]
+        model_selection: ModelSelectionArg,
+    },
+    /// Set the semantic alignment for a typed judge submission.
+    JudgeSetAlignment {
+        #[arg(long)]
+        job: String,
+        #[arg(value_enum)]
+        alignment: AlignmentArg,
+    },
+    /// Add one semantic finding. Read text from a file to avoid shell quoting hazards.
+    JudgeAddFinding {
+        #[arg(long)]
+        job: String,
+        #[arg(long, value_enum)]
+        kind: FindingKindArg,
         #[arg(long, value_name = "PATH")]
-        submission_file: PathBuf,
+        text_file: PathBuf,
+        #[arg(long)]
+        evidence_ref: Option<String>,
+    },
+    /// Set the finite confidence in the inclusive range 0 through 1.
+    JudgeSetConfidence {
+        #[arg(long)]
+        job: String,
+        confidence: f64,
+    },
+    /// Validate and persist the Flect-owned typed judge submission.
+    JudgeSubmit {
+        #[arg(long)]
+        job: String,
     },
     /// Delete Flect-owned completed workspaces, or explicitly selected stale jobs.
     Cleanup {
@@ -177,6 +210,58 @@ enum AgentCommand {
         #[arg(long, value_name = "HOURS")]
         older_than: Option<u64>,
     },
+}
+
+#[derive(Clone, Copy, Debug, ValueEnum)]
+enum AlignmentArg {
+    Same,
+    Partial,
+    Different,
+    Uncertain,
+}
+impl From<AlignmentArg> for Alignment {
+    fn from(value: AlignmentArg) -> Self {
+        match value {
+            AlignmentArg::Same => Self::Same,
+            AlignmentArg::Partial => Self::Partial,
+            AlignmentArg::Different => Self::Different,
+            AlignmentArg::Uncertain => Self::Uncertain,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, ValueEnum)]
+enum FindingKindArg {
+    MissingRequirement,
+    UnrequestedChange,
+    ViolatedConstraint,
+    PotentialSideEffect,
+}
+impl From<FindingKindArg> for FindingCategory {
+    fn from(value: FindingKindArg) -> Self {
+        match value {
+            FindingKindArg::MissingRequirement => Self::MissingRequirements,
+            FindingKindArg::UnrequestedChange => Self::UnrequestedChanges,
+            FindingKindArg::ViolatedConstraint => Self::ViolatedConstraints,
+            FindingKindArg::PotentialSideEffect => Self::PotentialSideEffects,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, ValueEnum)]
+enum ModelSelectionArg {
+    Explicit,
+    Inherited,
+    Unknown,
+}
+impl From<ModelSelectionArg> for flect_core::AgentModelSelection {
+    fn from(value: ModelSelectionArg) -> Self {
+        match value {
+            ModelSelectionArg::Explicit => Self::Explicit,
+            ModelSelectionArg::Inherited => Self::Inherited,
+            ModelSelectionArg::Unknown => Self::Unknown,
+        }
+    }
 }
 
 #[tokio::main]
