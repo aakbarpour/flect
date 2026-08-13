@@ -10,9 +10,9 @@ The verifier returns one JSON object matching `echoed_spec_schema`. Each `affect
 
 ## Judge spawn
 
-After Flect accepts the echo, prepare a reconciliation job and spawn a different fresh child. The judge may receive the job's IntendedSpec, EchoedSpec, available evidence, `evidence_contract`, instructions, and judge schema. It must not receive the parent conversation or implementation reasoning. It returns only `alignment`, `findings[{kind,text,evidence_ref}]`, and `confidence`, using only contract-provided stable hunk IDs for evidence refs. Flect derives persisted finding IDs, files, exact hunks, line ranges, and the recommended action; `SAME` has no findings.
+After Flect accepts the echo, prepare a reconciliation job and spawn a different fresh child. The judge may receive the job's IntendedSpec, EchoedSpec, available evidence, `evidence_contract`, instructions, judge schema, submission file, and submission schema. It must not receive the parent conversation or implementation reasoning. It writes exactly one `ReconciliationAgentSubmission` containing `alignment`, `findings[{kind,text,evidence_ref}]`, and `confidence` to Flect's generated `submission_file`, then submits it directly with `flect agent submit-verdict --submission <submission_file>`. When `flect_submit_verdict` is actually exposed to the child, use that typed MCP tool instead. The chat response is not a protocol channel and must never be copied or parsed by the parent. Flect derives persisted finding IDs, files, exact hunks, line ranges, and the recommended action; `SAME` has no findings.
 
-Submit the result to Flect. Do not persist or act on an unvalidated verdict.
+Flect strictly parses the direct submission. Markdown fences, prose, JSON wrappers, unknown keys, fabricated evidence, mismatched job IDs, and reused jobs are rejected. Do not persist or act on an unvalidated verdict.
 
 ## Repair
 

@@ -464,10 +464,16 @@ pub struct ReconciliationAgentJob {
     /// Machine-readable, fail-closed rules and permitted patch locations for evidence.
     pub evidence_contract: serde_json::Value,
     pub verdict_schema: serde_json::Value,
+    /// Flect-owned writable file that a fresh judge must populate with one exact
+    /// `ReconciliationAgentSubmission` before invoking `flect agent submit-verdict`.
+    pub submission_file: String,
+    /// Strict schema for the direct submission file. This deliberately wraps the
+    /// untrusted verdict with its lifecycle and model metadata.
+    pub submission_schema: serde_json::Value,
 }
 
 /// Typed response submitted by a reconciliation reasoner.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct ReconciliationAgentSubmission {
     pub job_id: String,

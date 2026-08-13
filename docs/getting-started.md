@@ -48,7 +48,8 @@ Register `flect mcp` using the current Codex stdio configuration in [the MCP gui
 3. `flect_prepare_blind`, then spawn a fresh no-parent-context verifier with only that job's allowed resources.
 4. `flect_submit_echo` with the verifier's typed response.
 5. `flect_prepare_reconciliation`, then spawn a different fresh judge with only that contract.
-6. `flect_submit_verdict`, then `flect_get_result` if the result is needed later.
+6. Have the judge submit its typed verdict through `flect_submit_verdict` when that MCP tool is exposed to the child. Otherwise the judge writes the exact generated `ReconciliationAgentSubmission` file and calls `flect agent submit-verdict --submission`; never parse or relay a judge chat response.
+7. `flect_get_result` if the result is needed later.
 
 For automated API mode, use `flect_inspect` followed by `flect_verify`. Both modes use the same domain types, evidence policy, and local `.flect/` store.
 

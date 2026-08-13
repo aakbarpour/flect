@@ -15,7 +15,7 @@ use schemars::schema_for;
 use serde_json::{Map, Value, json};
 
 const PROTOCOL_VERSION: &str = "2025-11-25";
-const INSTRUCTIONS: &str = "Use flect_start before implementation. The configured API route defaults to gpt-5.6-luna with one bounded gpt-5.6-terra fallback; both remain configurable. For Codex-native verification, call flect_prepare_blind, hand only its allowed resources to a fresh no-parent-context verifier, submit its EchoedSpec with flect_submit_echo, prepare a separate judge with flect_prepare_reconciliation, and submit its Verdict with flect_submit_verdict. Alternatively, flect_verify retains the configured automated API workflow. Use flect_get_result to retrieve the persisted verdict.";
+const INSTRUCTIONS: &str = "Use flect_start before implementation. The configured API route defaults to gpt-5.6-luna with one bounded gpt-5.6-terra fallback; both remain configurable. For Codex-native verification, call flect_prepare_blind, hand only its allowed resources to a fresh no-parent-context verifier, submit its EchoedSpec with flect_submit_echo, and prepare a separate judge with flect_prepare_reconciliation. The judge must submit directly through flect_submit_verdict when this tool is exposed to it; otherwise it must write the exact generated ReconciliationAgentSubmission file and invoke flect agent submit-verdict itself. Never parse or re-submit a judge chat response. Alternatively, flect_verify retains the configured automated API workflow. Use flect_get_result to retrieve the persisted verdict.";
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 enum Lifecycle {

@@ -17,7 +17,7 @@ use thiserror::Error;
 use crate::{EvidenceError, materialize_judge_verdict};
 
 const VERIFIER_INSTRUCTIONS: &str = "You are the blind Flect verifier. You have not been given the original task. Do not attempt to discover it. Inspect only the supplied sanitized patch evidence. Determine what behavior this patch appears to add, remove, or change. Return only a valid EchoedSpec matching the supplied schema. Each affected_scope entry is an object: file must exactly equal a path in the supplied manifest; symbol is optional descriptive function, class, or region detail and is not a path. Do not perform general style review. Do not invent files, lines, requirements, or motivations. Preserve uncertainty.";
-const JUDGE_INSTRUCTIONS: &str = "You are the Flect reconciliation judge. Return JSON only: one object matching verdict_schema, with no wrapper, prose, Markdown, or extra keys. Compare IntendedSpec with EchoedSpec for complete alignment, not merely whether a requested change is present: surface scope creep, unrelated behavior, added functionality, and task-boundary violations. When the patch advances a requested objective or requirement but has a missing requirement, constraint violation, or divergence, use PARTIAL; reserve DIFFERENT for behavior that is materially unrelated to or contradictory with the requested work. Make only the smallest semantic judgment: alignment, findings, and confidence. Each finding has kind, text, and optional evidence_ref. Use only kind values and evidence_ref values listed in evidence_contract. Never emit actions, IDs, files, patch text, line ranges, summaries, or uncertainties. SAME must have zero findings; PARTIAL and DIFFERENT must have at least one finding. Flect derives the trusted persisted Verdict.";
+const JUDGE_INSTRUCTIONS: &str = "You are the Flect reconciliation judge. Do not use chat text as the protocol payload. Write exactly one ReconciliationAgentSubmission matching submission_schema to submission_file, then invoke `flect agent submit-verdict --submission <submission_file>` directly. Do not wrap JSON in Markdown, prose, or another object. Compare IntendedSpec with EchoedSpec for complete alignment, not merely whether a requested change is present: surface scope creep, unrelated behavior, added functionality, and task-boundary violations. When the patch advances a requested objective or requirement but has a missing requirement, constraint violation, or divergence, use PARTIAL; reserve DIFFERENT for behavior that is materially unrelated to or contradictory with the requested work. Make only the smallest semantic judgment: alignment, findings, and confidence. Each finding has kind, text, and optional evidence_ref. Use only kind values and evidence_ref values listed in evidence_contract. Never emit actions, IDs, files, patch text, line ranges, summaries, or uncertainties. SAME must have zero findings; PARTIAL and DIFFERENT must have at least one finding. Flect derives the trusted persisted Verdict.";
 static JOB_SEQUENCE: AtomicU64 = AtomicU64::new(0);
 
 #[derive(Debug, Error)]
@@ -259,9 +259,11 @@ impl AgentService {
         let run = RunStore::new(self.repository.root())
             .load_run(Some(&blind.job.run_id))
             .map_err(|error| AgentWorkflowError::RunState(error.to_string()))?;
+        let job_id = generate_id("judge", &blind.job.run_id)?;
+        let submission_file = self.create_reconciliation_submission_file(&job_id)?;
         let job = ReconciliationAgentJob {
             version: 1,
-            job_id: generate_id("judge", &blind.job.run_id)?,
+            job_id,
             run_id: blind.job.run_id.clone(),
             blind_job_id: blind.job.job_id.clone(),
             instructions: JUDGE_INSTRUCTIONS.to_owned(),
@@ -270,6 +272,8 @@ impl AgentService {
             available_evidence: blind.job.bundle.patch.files.clone(),
             evidence_contract: evidence_contract(&blind.job.bundle),
             verdict_schema: strict_schema::<flect_core::JudgeVerdict>()?,
+            submission_file: submission_file.display().to_string(),
+            submission_schema: strict_schema::<ReconciliationAgentSubmission>()?,
         };
         self.save_reconciliation_state(&ReconciliationState {
             version: 1,
@@ -330,6 +334,7 @@ impl AgentService {
         self.save_blind_state(&blind)?;
         if self.cleanup_on_complete {
             self.remove_owned_workspace(&blind.job.job_id)?;
+            self.remove_reconciliation_submission_file(&state.job.job_id)?;
         }
         Ok(record)
     }
@@ -444,6 +449,61 @@ impl AgentService {
             write_json_readonly(&context_directory.join(format!("{index:04}.json")), context)?;
         }
         Ok(workspace)
+    }
+
+    fn create_reconciliation_submission_file(
+        &self,
+        job_id: &str,
+    ) -> Result<PathBuf, AgentWorkflowError> {
+        validate_job_id(job_id)?;
+        fs::create_dir_all(&self.workspace_root)
+            .map_err(|source| workspace_error(&self.workspace_root, source))?;
+        let repository_root = canonical_existing(self.repository.root())?;
+        let workspace_root = canonical_existing(&self.workspace_root)?;
+        if workspace_root.starts_with(repository_root) {
+            return Err(AgentWorkflowError::UnsafeWorkspace);
+        }
+        let directory = workspace_root.join("reconciliation-submissions");
+        fs::create_dir_all(&directory).map_err(|source| workspace_error(&directory, source))?;
+        let directory = canonical_existing(&directory)?;
+        if !directory.starts_with(&workspace_root) {
+            return Err(AgentWorkflowError::UnsafeWorkspace);
+        }
+        let path = directory.join(format!("{job_id}.json"));
+        fs::write(&path, []).map_err(|source| workspace_error(&path, source))?;
+        Ok(path)
+    }
+
+    fn remove_reconciliation_submission_file(
+        &self,
+        job_id: &str,
+    ) -> Result<bool, AgentWorkflowError> {
+        validate_job_id(job_id)?;
+        let workspace_root = canonical_existing(&self.workspace_root)?;
+        let directory = workspace_root.join("reconciliation-submissions");
+        if !directory.exists() {
+            return Ok(false);
+        }
+        let directory = canonical_existing(&directory)?;
+        if !directory.starts_with(&workspace_root)
+            || directory.parent() != Some(workspace_root.as_path())
+        {
+            return Err(AgentWorkflowError::UnsafeCleanup(
+                directory.display().to_string(),
+            ));
+        }
+        let path = directory.join(format!("{job_id}.json"));
+        if !path.exists() {
+            return Ok(false);
+        }
+        let canonical = canonical_existing(&path)?;
+        if canonical != path || canonical.parent() != Some(directory.as_path()) {
+            return Err(AgentWorkflowError::UnsafeCleanup(
+                path.display().to_string(),
+            ));
+        }
+        fs::remove_file(&canonical).map_err(|source| workspace_error(&canonical, source))?;
+        Ok(true)
     }
 
     fn blind_state_path(&self, job_id: &str) -> Result<PathBuf, AgentWorkflowError> {

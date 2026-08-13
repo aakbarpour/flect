@@ -68,19 +68,20 @@ fn complete_agent_handoff_is_blind_validated_and_persisted() {
     assert_ne!(judge.job_id, blind.job_id);
     assert_eq!(judge.echoed_spec, echoed);
     assert!(judge.intended_spec.objective.contains(FORWARD_SENTINEL));
+    assert!(Path::new(&judge.submission_file).is_file());
+    assert_eq!(judge.submission_schema["additionalProperties"], false);
 
-    let record = service
-        .submit_verdict(ReconciliationAgentSubmission {
-            job_id: judge.job_id,
-            verdict: JudgeVerdict {
-                alignment: Alignment::Same,
-                findings: Vec::new(),
-                confidence: 0.9,
-            },
-            model: Some("runtime-inherited".to_owned()),
-            model_selection: AgentModelSelection::Inherited,
-        })
-        .unwrap();
+    let submission = ReconciliationAgentSubmission {
+        job_id: judge.job_id.clone(),
+        verdict: JudgeVerdict {
+            alignment: Alignment::Same,
+            findings: Vec::new(),
+            confidence: 0.9,
+        },
+        model: Some("runtime-inherited".to_owned()),
+        model_selection: AgentModelSelection::Inherited,
+    };
+    let record = service.submit_verdict(submission.clone()).unwrap();
     assert_eq!(record.isolation, flect_core::IsolationLevel::Structural);
     assert_eq!(record.model_calls.len(), 2);
     assert_eq!(record.model_calls[0].provider, "codex-native");
@@ -91,6 +92,11 @@ fn complete_agent_handoff_is_blind_validated_and_persisted() {
         record
     );
     assert!(!Path::new(&blind_workspace).exists());
+    assert!(!Path::new(&judge.submission_file).exists());
+    assert!(matches!(
+        service.submit_verdict(submission),
+        Err(AgentWorkflowError::InvalidJobState(_))
+    ));
 }
 
 #[test]

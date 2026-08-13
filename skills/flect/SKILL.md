@@ -21,8 +21,8 @@ Use Flect as the trusted state, sanitization, schema, evidence, and persistence 
 3. Request only `EchoedSpec`. Prefer the configured default primary (`gpt-5.6-luna`) when the runtime accepts an explicit override; otherwise inherit and report the runtime model. Never claim Luna was used unless the spawn API accepted Luna and the result records it.
 4. Submit the structured response with `flect_submit_echo` or `flect agent submit-echo`.
 5. Call `flect_prepare_reconciliation` or `flect agent prepare-reconciliation`.
-6. Spawn a different fresh judge with no inherited conversation. Give it only the returned judge contract. Request only `Verdict`.
-7. Submit with `flect_submit_verdict` or `flect agent submit-verdict`.
+6. Spawn a different fresh judge with no inherited conversation. Give it only the returned judge contract. If `flect_submit_verdict` is exposed to the child, it must use that typed MCP tool. Otherwise it must write one exact `ReconciliationAgentSubmission` to the Flect-generated `submission_file` and invoke `flect agent submit-verdict --submission <submission_file>` itself. Its chat reply is never a submission payload.
+7. Flect validates the direct typed submission; do not copy, unwrap, normalize, or repair a judge chat response.
 
 Read [references/agent-mode.md](references/agent-mode.md) before spawning agents and [references/isolation.md](references/isolation.md) when reporting assurance.
 
