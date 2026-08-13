@@ -460,15 +460,16 @@ pub struct ReconciliationAgentJob {
     pub instructions: String,
     pub intended_spec: IntendedSpec,
     pub echoed_spec: EchoedSpec,
-    pub available_evidence: Vec<ChangedFile>,
-    /// Machine-readable, fail-closed rules and permitted patch locations for evidence.
-    pub evidence_contract: serde_json::Value,
-    pub verdict_schema: serde_json::Value,
+    /// Machine-readable, fail-closed stable patch references for judge findings.
+    ///
+    /// This is reference material, not a judge-output schema. The only schema
+    /// emitted for judge output is `submission_schema` below.
+    pub evidence_ref_contract: serde_json::Value,
     /// Flect-owned writable file that a fresh judge must populate with one exact
     /// `ReconciliationAgentSubmission`; a trusted orchestrator later submits only
     /// this opaque path to `flect agent submit-verdict --submission-file`.
     pub submission_file: String,
-    /// Strict schema for the direct submission file. This deliberately wraps the
+    /// The sole strict schema emitted for judge output. It deliberately wraps the
     /// untrusted verdict with its lifecycle and model metadata.
     pub submission_schema: serde_json::Value,
 }

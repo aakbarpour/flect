@@ -17,7 +17,7 @@ use thiserror::Error;
 use crate::{EvidenceError, materialize_judge_verdict};
 
 const VERIFIER_INSTRUCTIONS: &str = "You are the blind Flect verifier. You have not been given the original task. Do not attempt to discover it. Inspect only the supplied sanitized patch evidence. Determine what behavior this patch appears to add, remove, or change. Return only a valid EchoedSpec matching the supplied schema. Each affected_scope entry is an object: file must exactly equal a path in the supplied manifest; symbol is optional descriptive function, class, or region detail and is not a path. Do not perform general style review. Do not invent files, lines, requirements, or motivations. Preserve uncertainty.";
-const JUDGE_INSTRUCTIONS: &str = "You are the Flect reconciliation judge. Do not use chat text as the protocol payload. Write exactly one ReconciliationAgentSubmission matching submission_schema to submission_file. Do not invoke Flect commands or persist Flect state; a trusted orchestrator will submit only this designated opaque file after you finish. Do not wrap JSON in Markdown, prose, or another object. Compare IntendedSpec with EchoedSpec for complete alignment, not merely whether a requested change is present: surface scope creep, unrelated behavior, added functionality, and task-boundary violations. When the patch advances a requested objective or requirement but has a missing requirement, constraint violation, or divergence, use PARTIAL; reserve DIFFERENT for behavior that is materially unrelated to or contradictory with the requested work. Make only the smallest semantic judgment: alignment, findings, and confidence. Each finding has kind, text, and optional evidence_ref. Use only kind values and evidence_ref values listed in evidence_contract. Never emit actions, IDs, files, patch text, line ranges, summaries, or uncertainties. SAME must have zero findings; PARTIAL and DIFFERENT must have at least one finding. Flect derives the trusted persisted Verdict.";
+const JUDGE_INSTRUCTIONS: &str = "You are the Flect reconciliation judge. Write exactly one ReconciliationAgentSubmission matching submission_schema to submission_file, then stop. Do not use chat text as the protocol payload, invoke Flect commands, or persist Flect state; a trusted orchestrator will submit only this designated opaque file after you finish. Do not wrap JSON in Markdown, prose, or another object. submission_schema is the only output schema. Each finding may contain only kind, text, and optional evidence_ref. evidence, file, line, patch_hunk, finding_id, and all other persisted evidence fields are forbidden. Use only evidence_ref IDs in evidence_ref_contract. Compare IntendedSpec with EchoedSpec for complete alignment, not merely whether a requested change is present: surface scope creep, unrelated behavior, added functionality, and task-boundary violations. When the patch advances a requested objective or requirement but has a missing requirement, constraint violation, or divergence, use PARTIAL; reserve DIFFERENT for behavior that is materially unrelated to or contradictory with the requested work. SAME must have zero findings; PARTIAL and DIFFERENT must have at least one finding. Flect derives the trusted persisted Verdict.";
 static JOB_SEQUENCE: AtomicU64 = AtomicU64::new(0);
 
 #[derive(Debug, Error)]
@@ -271,9 +271,7 @@ impl AgentService {
             instructions: JUDGE_INSTRUCTIONS.to_owned(),
             intended_spec: run.intended_spec,
             echoed_spec,
-            available_evidence: blind.job.bundle.patch.files.clone(),
-            evidence_contract: evidence_contract(&blind.job.bundle),
-            verdict_schema: strict_schema::<flect_core::JudgeVerdict>()?,
+            evidence_ref_contract: evidence_ref_contract(&blind.job.bundle),
             submission_file: submission_file.display().to_string(),
             submission_schema: strict_schema::<ReconciliationAgentSubmission>()?,
         };
@@ -623,7 +621,7 @@ impl AgentService {
     }
 }
 
-fn evidence_contract(bundle: &BlindBundle) -> Value {
+fn evidence_ref_contract(bundle: &BlindBundle) -> Value {
     let mut hunk_index = 0_u32;
     let files = bundle.patch.files.iter().map(|file| {
         let hunks = file.patch.split("@@ ").skip(1).filter_map(|part| {
@@ -640,7 +638,18 @@ fn evidence_contract(bundle: &BlindBundle) -> Value {
         serde_json::json!({"file": file.path, "hunks": hunks})
     }).collect::<Vec<_>>();
     serde_json::json!({
-        "version": 2,
+        "version": 3,
+        "finding_fields": ["kind", "text", "evidence_ref"],
+        "forbidden_finding_fields": [
+            "evidence",
+            "file",
+            "line",
+            "line_start",
+            "line_end",
+            "patch_hunk",
+            "finding_id",
+            "finding_ids"
+        ],
         "allowed_alignments": ["SAME", "PARTIAL", "DIFFERENT", "UNCERTAIN"],
         "available_finding_kinds": [
             "missing_requirement",
@@ -661,9 +670,9 @@ fn evidence_contract(bundle: &BlindBundle) -> Value {
             "potential_side_effect": "A distinct plausible externally observable impact of an added, broadened, or constraint-violating behavior. When a supported unrequested change or violated constraint has a separately described consequence in EchoedSpec behavior_after or side_effects, emit both findings with the same evidence reference; do not treat one category as a substitute for the other."
         },
         "rules": [
-            "Return the verdict_schema object directly; do not add a verdict wrapper.",
-            "recommended_action, file, patch text, line ranges, and persisted finding IDs are derived by Flect and must not be emitted.",
-            "Each finding has kind, text, and optional evidence_ref. evidence_ref, when present, must equal one listed stable hunk ID.",
+            "submission_schema is the only judge-output schema; do not return a verdict wrapper or another object.",
+            "Each finding may contain only kind, text, and optional evidence_ref. evidence, file, line, patch_hunk, finding_id, and persisted evidence fields are forbidden.",
+            "evidence_ref, when present, must equal one listed stable hunk ID.",
             "SAME requires findings to be empty; PARTIAL and DIFFERENT require at least one finding.",
             "Do not return SAME merely because a requested change is present; SAME requires no supported divergence from the full IntendedSpec.",
             "Before finalizing a non-SAME verdict, check whether each supported unrequested change or violated constraint has a distinct consequence described by EchoedSpec; classify that consequence as potential_side_effect when it is externally observable.",

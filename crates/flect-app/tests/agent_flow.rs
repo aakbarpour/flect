@@ -135,43 +135,67 @@ fn accepts_structured_scope_and_exposes_judge_evidence_contract() {
         })
         .unwrap();
     let judge = service.prepare_reconciliation(&blind.job_id).unwrap();
-    assert_eq!(judge.evidence_contract["version"], 2);
+    assert_eq!(judge.evidence_ref_contract["version"], 3);
+    assert_eq!(
+        judge.evidence_ref_contract["finding_fields"],
+        serde_json::json!(["kind", "text", "evidence_ref"])
+    );
     assert!(
-        judge.evidence_contract["finding_kind_guidance"]["unrequested_change"]
+        judge.evidence_ref_contract["forbidden_finding_fields"]
+            .as_array()
+            .unwrap()
+            .contains(&serde_json::json!("evidence"))
+    );
+    assert!(
+        judge.evidence_ref_contract["finding_kind_guidance"]["unrequested_change"]
             .as_str()
             .unwrap()
             .contains("even when the requested behavior is also present")
     );
     assert!(
-        judge.evidence_contract["finding_kind_guidance"]["potential_side_effect"]
+        judge.evidence_ref_contract["finding_kind_guidance"]["potential_side_effect"]
             .as_str()
             .unwrap()
             .contains("separately described consequence")
     );
     assert!(
-        judge.evidence_contract["alignment_meanings"]["DIFFERENT"]
+        judge.evidence_ref_contract["alignment_meanings"]["DIFFERENT"]
             .as_str()
             .unwrap()
             .contains("do not use DIFFERENT solely")
     );
     assert!(
-        judge.evidence_contract["rules"]
+        judge.evidence_ref_contract["rules"]
             .as_array()
             .unwrap()
             .iter()
-            .any(|rule| rule.as_str().unwrap().contains("finding ID"))
+            .any(|rule| rule.as_str().unwrap().contains("evidence_ref"))
     );
-    assert_eq!(judge.evidence_contract["files"][0]["file"], "app.txt");
+    assert_eq!(judge.evidence_ref_contract["files"][0]["file"], "app.txt");
     assert!(
-        judge.evidence_contract["files"][0]["hunks"]
+        judge.evidence_ref_contract["files"][0]["hunks"]
             .as_array()
             .unwrap()
             .iter()
             .all(|hunk| hunk["hunk"].as_str().unwrap().starts_with("@@ "))
     );
     assert_eq!(
-        judge.evidence_contract["files"][0]["hunks"][0]["hunk_id"],
+        judge.evidence_ref_contract["files"][0]["hunks"][0]["hunk_id"],
         "hunk/0"
+    );
+    let serialized = serde_json::to_value(&judge).unwrap();
+    assert!(serialized.get("submission_schema").is_some());
+    assert!(serialized.get("verdict_schema").is_none());
+    assert!(serialized.get("available_evidence").is_none());
+    let finding_schema = &judge.submission_schema["$defs"]["JudgeFinding"];
+    assert_eq!(finding_schema["additionalProperties"], false);
+    assert_eq!(
+        finding_schema["properties"]
+            .as_object()
+            .unwrap()
+            .keys()
+            .collect::<Vec<_>>(),
+        vec!["evidence_ref", "kind", "text"]
     );
 }
 
@@ -250,12 +274,83 @@ fn rejects_semantically_incompatible_compact_judge_output() {
 #[test]
 fn rejects_fabricated_agent_facing_evidence_fields() {
     for evidence in [
+        serde_json::json!({"kind": "missing_requirement", "text": "x", "evidence": {"hunk": 0}}),
         serde_json::json!({"kind": "missing_requirement", "text": "x", "file": "invented.rs"}),
         serde_json::json!({"kind": "missing_requirement", "text": "x", "line_start": 99}),
         serde_json::json!({"finding_ids": ["missing_requirements/99"], "description": "x"}),
     ] {
         assert!(serde_json::from_value::<JudgeFinding>(evidence).is_err());
     }
+}
+
+#[test]
+fn reconciliation_submission_rejects_observed_evidence_shape_and_wrappers() {
+    let observed = serde_json::json!({
+        "job_id": "judge_observed",
+        "model": "gpt-5.6-terra",
+        "model_selection": "explicit",
+        "verdict": {
+            "alignment": "PARTIAL",
+            "confidence": 0.9,
+            "findings": [{
+                "kind": "missing_requirement",
+                "text": "Missing behavior",
+                "evidence": {"hunk": 0}
+            }]
+        }
+    });
+    assert!(serde_json::from_value::<ReconciliationAgentSubmission>(observed).is_err());
+
+    for wrapper in [
+        serde_json::json!({"submission": {}}),
+        serde_json::json!({"job_id": "judge", "verdict": {}}),
+    ] {
+        assert!(serde_json::from_value::<ReconciliationAgentSubmission>(wrapper).is_err());
+    }
+}
+
+#[test]
+fn valid_evidence_ref_submission_persists_without_evidence_repair() {
+    let repository = fixture_repository();
+    let workspace = tempfile::tempdir().unwrap();
+    let service = AgentService::with_workspace_root(
+        GitRepository::discover(repository.path()).unwrap(),
+        workspace.path().join("jobs"),
+    )
+    .unwrap();
+    let blind = service.prepare_blind(None, None).unwrap();
+    service
+        .submit_echo(BlindAgentSubmission {
+            job_id: blind.job_id.clone(),
+            echoed_spec: EchoedSpec::default(),
+            model: Some("gpt-5.6-terra".to_owned()),
+            model_selection: AgentModelSelection::Explicit,
+        })
+        .unwrap();
+    let judge = service.prepare_reconciliation(&blind.job_id).unwrap();
+    let submission = ReconciliationAgentSubmission {
+        job_id: judge.job_id.clone(),
+        verdict: JudgeVerdict {
+            alignment: Alignment::Partial,
+            findings: vec![JudgeFinding {
+                kind: FindingCategory::MissingRequirements,
+                text: "The requested behavior is absent.".to_owned(),
+                evidence_ref: Some("hunk/0".to_owned()),
+            }],
+            confidence: 0.9,
+        },
+        model: Some("gpt-5.6-terra".to_owned()),
+        model_selection: AgentModelSelection::Explicit,
+    };
+    write_judge_submission(&judge.submission_file, &submission);
+    let record = service
+        .submit_verdict_file(Path::new(&judge.submission_file))
+        .unwrap();
+    assert_eq!(record.verdict.alignment, Alignment::Partial);
+    assert_eq!(
+        record.verdict.evidence[0].finding_ids,
+        vec!["missing_requirements/0"]
+    );
 }
 
 #[test]
