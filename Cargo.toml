@@ -20,7 +20,7 @@ flect-core = { path = "crates/flect-core" }
 flect-app = { path = "crates/flect-app" }
 flect-runner = { path = "crates/flect-runner" }
 globset = "0.4.16"
-jsonschema = { version = "0.33.0", default-features = false }
+jsonschema = { version = "0.49.9", default-features = false }
 miette = { version = "7.6.0", features = ["fancy"] }
 reqwest = { version = "0.12.23", default-features = false, features = ["json", "rustls-tls"] }
 schemars = "1.0.4"
