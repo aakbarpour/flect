@@ -1,3 +1,12 @@
 /target/
 .flect/
 
+# Local benchmark provenance and Codex skill material retained outside version control.
+/.agents/
+/benchmark-40-corrected/
+/benchmark-40-corrected-controller/
+/benchmark-canonical5-corrected/
+/benchmark-canonical5-corrected-controller/
+/benchmark-materialization-controller-final-20260813211422/
+/benchmark-materialization-preflight-final-20260813211422/
+/canonical-5-green-20260813162716-1faa07fe19e34f1f9eb025f0ff6099d1/
