@@ -2,13 +2,36 @@
 
 **Hide the prompt. Read the patch.**
 
+[![CI](https://github.com/aakbarpour/flect/actions/workflows/ci.yml/badge.svg)](https://github.com/aakbarpour/flect/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+
 Coding agents usually verify implementations while knowing what they were supposed to implement. Flect removes that anchor.
 
 It gives an independent verifier the patch without the original task, reconstructs what the implementation actually appears to do, then compares that reconstructed intent with what you requested.
 
 Tests ask whether the code works. Flect asks whether you built the right thing.
 
-> **Project status:** The MVP verification, evaluation, packaging, Codex Skill, and stdio MCP workflows are implemented. Flect supports deterministic offline tests, a Responses-compatible API mode, and a Codex-native mode with fresh verifier and judge handoffs. No public model benchmark or tagged release is claimed here.
+> **Project status:** The verification pipeline, evaluation suite, packaging, Codex Skill, and stdio MCP workflows are implemented. Flect supports deterministic offline tests, a Responses-compatible API mode, and a Codex-native mode with fresh verifier and judge handoffs. A retained 20-case Codex-native engineering run is published below; it is not a 40-case release claim or a population-level effectiveness study.
+
+## Benchmark snapshot
+
+The latest retained Codex-native run covers the first 20 cases of the frozen 40-case suite on corrected source semantics. It used a fresh Terra verifier and a separate fresh Terra judge per case, with explicit no-parent-context handoffs and the typed filesystem protocol.
+
+| Signal | Result |
+| --- | ---: |
+| Cases attempted / persisted | **20 / 19** |
+| Exact verdict accuracy (attempted) | **13/20 = 65.00%** |
+| Exact verdict accuracy (completed) | **13/19 = 68.42%** |
+| Good-patch acceptance | **3/4 = 75.00%** |
+| Bad-patch detection (completed) | **15/15 = 100.00%** |
+| Category exact match | **11/19 = 57.89%** |
+| Category micro precision / recall | **76.00% / 79.17%** |
+| Contamination failures | **0** |
+| Semantic retries / repair / normalization | **0 / 0 / 0** |
+
+The run is deliberately reported fail-closed: one judge submission (`canonical-05`) was rejected for an invalid side-effect disposition and remains unpersisted in the raw artifact. The result therefore should not be read as a perfect score or as evidence that Flect catches every semantic mismatch. See the complete [20-case report](benchmarks/codex-native-corrected-20.md) and [machine-readable provenance](benchmarks/codex-native-corrected-20.json).
+
+Frozen provenance: production `b61e5d6`, harness `a4363ce`, suite SHA-256 `141DDF6D...B6FD36E`. The full preflight materialized 37 cases with native Git, 2 with structural fixture hunks, and 1 with the disclosed `flect-binary-surrogate-v1` opaque binary surrogate.
 
 ## How it works
 
