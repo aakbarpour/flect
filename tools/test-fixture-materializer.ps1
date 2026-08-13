@@ -18,6 +18,15 @@ function New-Case([string]$Path, [string]$Patch) {
         }
     }
 }
+function New-BinaryCase([string]$Path) {
+    [pscustomobject]@{
+        id = 'binary-fixture-test'
+        base_files = @([pscustomobject]@{ path = $Path; content = '<opaque base>' })
+        candidate_patch = [pscustomobject]@{
+            files = @([pscustomobject]@{ path = $Path; status = 'modified'; patch = "@@ -1 +1 @@`n-<opaque base>`n+<placeholder>"; insertions = 1; deletions = 1; binary = $true })
+        }
+    }
+}
 
 $root = Join-Path ([IO.Path]::GetTempPath()) ('flect-fixture-materializer-' + [Guid]::NewGuid().ToString('N'))
 $control = Join-Path ([IO.Path]::GetTempPath()) ('flect-fixture-materializer-control-' + [Guid]::NewGuid().ToString('N'))
@@ -56,6 +65,31 @@ try {
     [IO.File]::WriteAllText((Join-Path $root 'extra.txt'), 'unexpected', [Text.UTF8Encoding]::new($false))
     Assert-Throws { Assert-FixtureMaterialization $root $valid } 'extra file change'
     Remove-Item -LiteralPath (Join-Path $root 'extra.txt')
+
+    [IO.File]::WriteAllBytes((Join-Path $root 'asset.bin'), [byte[]](0x41, 0x00, 0xff, 0x42))
+    & git -C $root add -- asset.bin
+    & git -C $root commit -qm binary-base
+    $binary = New-BinaryCase 'asset.bin'
+    $binaryPatch = Join-Path $control 'binary.patch'
+    $first = Invoke-FixtureMaterialization $root $binary $binaryPatch
+    Assert-Equal $first.mode 'binary_surrogate' 'binary surrogate mode'
+    Assert-FixtureMaterialization $root $binary -BinarySurrogate $first.binary_surrogate
+    if (-not (Test-Path -LiteralPath (Join-Path $root '.git\info\attributes'))) { throw 'binary attribute was not private Git metadata' }
+    if (Test-Path -LiteralPath (Join-Path $root '.gitattributes')) { throw 'binary attribute leaked into working tree' }
+    Assert-Equal ((@(& git -C $root diff --name-only HEAD) -join ',')) 'asset.bin' 'binary surrogate changed only its candidate path'
+    $firstHash = $first.binary_surrogate.after_sha256
+    & git -C $root restore --source=HEAD --staged --worktree -- asset.bin
+    $second = Invoke-FixtureMaterialization $root $binary $binaryPatch
+    Assert-Equal $second.binary_surrogate.after_sha256 $firstHash 'binary surrogate repeatability'
+
+    & git -C $root restore --source=HEAD --staged --worktree -- asset.bin
+    [IO.File]::WriteAllBytes((Join-Path $root 'empty.bin'), [byte[]]@())
+    & git -C $root add -- empty.bin
+    & git -C $root commit -qm empty-binary-base
+    $empty = New-BinaryCase 'empty.bin'
+    $emptyResult = Invoke-FixtureMaterialization $root $empty (Join-Path $control 'empty.patch')
+    if ($emptyResult.binary_surrogate.before_sha256 -eq $emptyResult.binary_surrogate.after_sha256) { throw 'empty binary base was not mutated' }
+    Assert-FixtureMaterialization $root $empty -BinarySurrogate $emptyResult.binary_surrogate
     'fixture materializer tests passed'
 }
 finally {

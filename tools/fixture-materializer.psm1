@@ -122,7 +122,7 @@ function New-NativeCandidatePatch {
 
     $lines = [System.Collections.Generic.List[string]]::new()
     foreach ($file in $Case.candidate_patch.files) {
-        if ($file.binary) { throw "binary fixture patches are unsupported: $($file.path)" }
+        if ($file.binary) { throw "binary fixture patch requires surrogate materialization: $($file.path)" }
         $oldPath = if ($file.PSObject.Properties['old_path'] -and $file.old_path) { $file.old_path } else { $file.path }
         $lines.Add("diff --git a/$oldPath b/$($file.path)")
         switch ($file.status) {
@@ -138,8 +138,81 @@ function New-NativeCandidatePatch {
     return (($lines -join "`n") + "`n")
 }
 
+function Get-Sha256Hex {
+    param([byte[]]$Bytes)
+
+    $hasher = [System.Security.Cryptography.SHA256]::Create()
+    try {
+        return ($hasher.ComputeHash($Bytes) | ForEach-Object { $_.ToString('x2') }) -join ''
+    }
+    finally {
+        $hasher.Dispose()
+    }
+}
+
+function Set-PrivateBinaryAttribute {
+    param([string]$CasePath, [string]$Path)
+
+    if ($Path -match '(^|[\\/])\.\.?([\\/]|$)') { throw "unsafe binary fixture path: $Path" }
+    $attributesPath = Join-Path $CasePath '.git\info\attributes'
+    [System.IO.Directory]::CreateDirectory((Split-Path -Parent $attributesPath)) | Out-Null
+    $line = "/$($Path.Replace('\\', '/')) binary"
+    $existing = if (Test-Path -LiteralPath $attributesPath) { [System.IO.File]::ReadAllText($attributesPath) } else { '' }
+    if ($existing.Length -ne 0 -and -not $existing.EndsWith("`n")) { $existing += "`n" }
+    [System.IO.File]::WriteAllText($attributesPath, $existing + $line + "`n", [System.Text.UTF8Encoding]::new($false))
+}
+
+function New-BinarySurrogate {
+    param([string]$CasePath, $File)
+
+    if ($File.status -ne 'modified') { throw "binary surrogate supports only modified files: $($File.path)" }
+    $target = Join-Path $CasePath $File.path
+    if (-not (Test-Path -LiteralPath $target -PathType Leaf)) { throw "binary surrogate base file is absent: $($File.path)" }
+
+    $baseBytes = [System.IO.File]::ReadAllBytes($target)
+    $beforeHash = Get-Sha256Hex $baseBytes
+    # This seed intentionally hashes fixture representation, path, and base bytes; it never
+    # interprets the textual placeholder patch as replacement file content.
+    $record = [ordered]@{
+        algorithm = 'flect-binary-surrogate-v1'
+        path = $File.path
+        status = $File.status
+        binary = [bool]$File.binary
+        candidate_patch_sha256 = Get-Sha256Hex ([System.Text.Encoding]::UTF8.GetBytes([string]$File.patch))
+        base_sha256 = $beforeHash
+    } | ConvertTo-Json -Compress
+    $hasher = [System.Security.Cryptography.SHA256]::Create()
+    try {
+        $seed = $hasher.ComputeHash([System.Text.Encoding]::UTF8.GetBytes($record))
+    }
+    finally {
+        $hasher.Dispose()
+    }
+    $suffix = [byte[]](0x00, 0xf1, 0xec, 0x7a) + $seed
+    $afterBytes = [byte[]]$baseBytes + $suffix
+    [System.IO.File]::WriteAllBytes($target, $afterBytes)
+    Set-PrivateBinaryAttribute $CasePath $File.path
+
+    [pscustomobject]@{
+        algorithm = 'flect-binary-surrogate-v1'
+        record_sha256 = Get-Sha256Hex ([System.Text.Encoding]::UTF8.GetBytes($record))
+        before_sha256 = $beforeHash
+        after_sha256 = Get-Sha256Hex $afterBytes
+    }
+}
+
 function Invoke-FixtureMaterialization {
     param([string]$CasePath, $Case, [string]$PatchPath)
+
+    $binaryFiles = @($Case.candidate_patch.files | Where-Object { $_.binary })
+    if ($binaryFiles.Count -gt 0) {
+        if ($binaryFiles.Count -ne $Case.candidate_patch.files.Count) { throw 'binary surrogate cannot be combined with textual fixture files' }
+        if ($binaryFiles.Count -ne 1) { throw 'binary surrogate requires exactly one binary fixture file' }
+        [System.IO.File]::WriteAllText($PatchPath, [string]$binaryFiles[0].patch, [System.Text.UTF8Encoding]::new($false))
+        $surrogate = New-BinarySurrogate $CasePath $binaryFiles[0]
+        Assert-FixtureMaterialization $CasePath $Case -BinarySurrogate $surrogate
+        return [pscustomobject]@{ mode = 'binary_surrogate'; hunk_count_metadata_valid = $null; binary_surrogate = $surrogate }
+    }
 
     $native = New-NativeCandidatePatch $Case
     [System.IO.File]::WriteAllText($PatchPath, $native, [System.Text.UTF8Encoding]::new($false))
@@ -157,7 +230,7 @@ function Invoke-FixtureMaterialization {
         if ($LASTEXITCODE -ne 0) { throw "exact git application unexpectedly failed for $($Case.id)" }
         try {
             Assert-FixtureMaterialization $CasePath $Case
-            return [pscustomobject]@{ mode = 'git_exact'; hunk_count_metadata_valid = $true }
+            return [pscustomobject]@{ mode = 'git_exact'; hunk_count_metadata_valid = $true; binary_surrogate = $null }
         }
         catch {
             & git -C $CasePath reset --hard HEAD | Out-Null
@@ -167,7 +240,6 @@ function Invoke-FixtureMaterialization {
 
     $countMetadataValid = $true
     foreach ($file in $Case.candidate_patch.files) {
-        if ($file.binary) { throw "binary fixture patches are unsupported: $($file.path)" }
         $oldPath = if ($file.PSObject.Properties['old_path'] -and $file.old_path) { $file.old_path } else { $file.path }
         $oldFullPath = Join-Path $CasePath $oldPath
         $newFullPath = Join-Path $CasePath $file.path
@@ -215,15 +287,27 @@ function Invoke-FixtureMaterialization {
             default { throw "unsupported fixture status $($file.status)" }
         }
     }
-    return [pscustomobject]@{ mode = 'fixture_structural'; hunk_count_metadata_valid = $countMetadataValid }
+    return [pscustomobject]@{ mode = 'fixture_structural'; hunk_count_metadata_valid = $countMetadataValid; binary_surrogate = $null }
 }
 
 function Assert-FixtureMaterialization {
-    param([string]$CasePath, $Case)
+    param([string]$CasePath, $Case, $BinarySurrogate)
 
     $expectedPaths = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::Ordinal)
     foreach ($file in $Case.candidate_patch.files) {
         $oldPath = if ($file.PSObject.Properties['old_path'] -and $file.old_path) { $file.old_path } else { $file.path }
+        if ($file.binary) {
+            if ($null -eq $BinarySurrogate) { throw "binary fixture requires surrogate metadata: $($file.path)" }
+            if ($file.status -ne 'modified') { throw "binary surrogate status is unsupported: $($file.status)" }
+            $target = Join-Path $CasePath $file.path
+            if (-not (Test-Path -LiteralPath $target -PathType Leaf)) { throw "binary surrogate file is absent: $($file.path)" }
+            $actualHash = Get-Sha256Hex ([System.IO.File]::ReadAllBytes($target))
+            if ($actualHash -cne $BinarySurrogate.after_sha256) { throw "binary surrogate bytes differ from recorded hash: $($file.path)" }
+            $attribute = & git -C $CasePath check-attr binary -- $file.path
+            if ($LASTEXITCODE -ne 0 -or $attribute -notmatch ': binary: set$') { throw "Git did not classify surrogate as binary: $($file.path)" }
+            $null = $expectedPaths.Add($file.path)
+            continue
+        }
         $baseFile = @($Case.base_files | Where-Object { $_.path -ceq $oldPath })
         $baseContent = if ($baseFile.Count -eq 1) { $baseFile[0].content } else { '' }
         $expected = Get-StructuralContent -BaseContent $baseContent -Patch $file.patch -Path $file.path

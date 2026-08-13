@@ -195,6 +195,17 @@ function Assert-CleanBlindBundle {
     }
 }
 
+function Assert-BinarySurrogateBlindBundle {
+    param([string]$BlindJobPath, [string]$Path)
+
+    $job = [System.IO.File]::ReadAllText($BlindJobPath) | ConvertFrom-Json
+    $excluded = @($job.bundle.manifest.excluded_paths | Where-Object { $_.path -ceq $Path -and $_.reason -ceq 'binary files are not sent to verifiers' })
+    if ($excluded.Count -ne 1) { throw "Flect did not capture and exclude binary surrogate path: $Path" }
+    if (@($job.bundle.patch.files | Where-Object { $_.path -ceq $Path }).Count -ne 0) {
+        throw "synthetic binary contents leaked into verifier patch context: $Path"
+    }
+}
+
 function Write-AgentDispatchInstructions {
     param([string]$Path, $Pinned, [string]$JobId, [string]$AgentTempRoot, [string]$CasePath, $Grammar)
 
@@ -283,21 +294,9 @@ foreach ($case in $cases) {
     $patchHash = (Get-FileHash -LiteralPath $candidatePatchPath -Algorithm SHA256).Hash
     Invoke-CaseCommand $casePath 'git' @('diff', '--check') $null
 
-    Assert-FixtureMaterialization $casePath $case
+    Assert-FixtureMaterialization $casePath $case -BinarySurrogate $materialization.binary_surrogate
     Assert-CaseStatus $case $casePath
     Assert-NoControlFiles $casePath
-
-    if ($PreflightOnly) {
-        $summary += [pscustomobject]@{
-            case = $case.id
-            materialization_mode = $materialization.mode
-            hunk_count_metadata_valid = $materialization.hunk_count_metadata_valid
-            status = ((git -C $casePath status --porcelain --untracked-files=all) -join '; ')
-            candidate_patch_sha256 = $patchHash
-            blind_bundle = 'not_dispatched'
-        }
-        continue
-    }
 
     $blindJobPath = Join-Path $controlPath 'blind-job.json'
     Push-Location $casePath
@@ -323,6 +322,21 @@ foreach ($case in $cases) {
     if ($blindJob.workspace -notlike "$agentStateRoot*") {
         throw "Blind job workspace is not in this case's fresh agent-state root: $($blindJob.workspace)"
     }
+    if ($materialization.mode -eq 'binary_surrogate') {
+        Assert-BinarySurrogateBlindBundle $blindJobPath $case.candidate_patch.files[0].path
+    }
+    if ($PreflightOnly) {
+        $summary += [pscustomobject]@{
+            case = $case.id
+            materialization_mode = $materialization.mode
+            hunk_count_metadata_valid = $materialization.hunk_count_metadata_valid
+            binary_surrogate = $materialization.binary_surrogate
+            status = ((git -C $casePath status --porcelain --untracked-files=all) -join '; ')
+            candidate_patch_sha256 = $patchHash
+            blind_bundle = 'clean'
+        }
+        continue
+    }
     Write-AgentDispatchInstructions (Join-Path $controlPath 'dispatch-manifest.json') $pinned $blindJob.job_id $agentTempRoot $casePath $grammar
     Write-Utf8File (Join-Path $controlPath 'run-manifest.json') ([pscustomobject]@{
         run_id = $RunId
@@ -341,6 +355,7 @@ foreach ($case in $cases) {
         candidate_patch_sha256 = $patchHash
         materialization_mode = $materialization.mode
         hunk_count_metadata_valid = $materialization.hunk_count_metadata_valid
+        binary_surrogate = $materialization.binary_surrogate
         blind_job_id = $blindJob.job_id
         flect_sha256 = $pinned.sha256
         agent_state_root = $agentStateRoot
