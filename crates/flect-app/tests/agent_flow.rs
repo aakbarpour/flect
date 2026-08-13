@@ -67,6 +67,23 @@ fn complete_agent_handoff_is_blind_validated_and_persisted() {
     let judge = service.prepare_reconciliation(&blind.job_id).unwrap();
     assert_ne!(judge.job_id, blind.job_id);
     assert_eq!(judge.echoed_spec, echoed);
+    assert!(Path::new(&judge.workspace).join("JUDGE.md").is_file());
+    assert!(Path::new(&judge.workspace).join("intended-spec.json").is_file());
+    assert!(Path::new(&judge.workspace).join("echoed-spec.json").is_file());
+    assert!(
+        Path::new(&judge.workspace)
+            .join("evidence-ref-contract.json")
+            .is_file()
+    );
+    assert_eq!(
+        judge.allowed_resources,
+        vec![
+            "intended-spec.json",
+            "echoed-spec.json",
+            "evidence-ref-contract.json",
+            "JUDGE.md",
+        ]
+    );
     assert!(judge.intended_spec.objective.contains(FORWARD_SENTINEL));
     assert!(judge.instructions.contains("`findings/000000`"));
     assert!(!judge.instructions.contains("judge-begin"));

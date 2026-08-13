@@ -457,7 +457,11 @@ pub struct ReconciliationAgentJob {
     pub job_id: String,
     pub run_id: String,
     pub blind_job_id: String,
+    /// Sanitized Flect-owned workspace containing only reconciliation inputs.
+    pub workspace: String,
     pub instructions: String,
+    /// The only files a fresh reconciliation reasoner may read in `workspace`.
+    pub allowed_resources: Vec<String>,
     pub intended_spec: IntendedSpec,
     pub echoed_spec: EchoedSpec,
     /// Machine-readable, fail-closed stable patch references for judge findings.

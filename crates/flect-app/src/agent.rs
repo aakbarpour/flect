@@ -300,15 +300,28 @@ impl AgentService {
         let job_id = generate_id("judge", &blind.job.run_id)?;
         let evidence_ref_contract = evidence_ref_contract(&blind.job.bundle, &echoed_spec);
         let draft_root = external_draft_root(&self.workspace_root, &job_id);
+        let workspace = self.create_reconciliation_workspace(
+            &job_id,
+            &run.intended_spec,
+            &echoed_spec,
+            &evidence_ref_contract,
+        )?;
         let job = ReconciliationAgentJob {
             version: 1,
             job_id: job_id.clone(),
             run_id: blind.job.run_id.clone(),
             blind_job_id: blind.job.job_id.clone(),
+            workspace: workspace.display().to_string(),
             instructions: format!(
                 "{JUDGE_INSTRUCTIONS} The assigned draft root is `{}`. The trusted parent submits only the bound job ID.",
                 draft_root.display()
             ),
+            allowed_resources: vec![
+                "intended-spec.json".to_owned(),
+                "echoed-spec.json".to_owned(),
+                "evidence-ref-contract.json".to_owned(),
+                "JUDGE.md".to_owned(),
+            ],
             intended_spec: run.intended_spec,
             echoed_spec,
             evidence_ref_contract,
@@ -692,6 +705,33 @@ impl AgentService {
         for (index, context) in bundle.context.iter().enumerate() {
             write_json_readonly(&context_directory.join(format!("{index:04}.json")), context)?;
         }
+        Ok(workspace)
+    }
+
+    fn create_reconciliation_workspace(
+        &self,
+        job_id: &str,
+        intended_spec: &flect_core::IntendedSpec,
+        echoed_spec: &EchoedSpec,
+        evidence_ref_contract: &Value,
+    ) -> Result<PathBuf, AgentWorkflowError> {
+        validate_job_id(job_id)?;
+        fs::create_dir_all(&self.workspace_root)
+            .map_err(|source| workspace_error(&self.workspace_root, source))?;
+        let repository_root = canonical_existing(self.repository.root())?;
+        let workspace_root = canonical_existing(&self.workspace_root)?;
+        if workspace_root.starts_with(repository_root) {
+            return Err(AgentWorkflowError::UnsafeWorkspace);
+        }
+        let workspace = self.workspace_root.join(job_id);
+        fs::create_dir(&workspace).map_err(|source| workspace_error(&workspace, source))?;
+        write_json_readonly(&workspace.join("intended-spec.json"), intended_spec)?;
+        write_json_readonly(&workspace.join("echoed-spec.json"), echoed_spec)?;
+        write_json_readonly(
+            &workspace.join("evidence-ref-contract.json"),
+            evidence_ref_contract,
+        )?;
+        write_readonly(&workspace.join("JUDGE.md"), JUDGE_INSTRUCTIONS.as_bytes())?;
         Ok(workspace)
     }
 
