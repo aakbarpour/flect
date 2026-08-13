@@ -6,7 +6,7 @@ Use the runtime's real collaboration tool. Prefer a child with no inherited turn
 
 Construct the child message only from `BlindAgentJob.instructions` and the paths in `allowed_resources`. The child may read only the prepared blind workspace. Do not mention the original task, IntendedSpec, issue, acceptance criteria, parent plan, branch, commits, or why a particular implementation was chosen.
 
-The verifier returns one JSON object matching `echoed_spec_schema`. Each `affected_scope` item is `{ "file": "exact/visible/path", "symbol": "optional detail or null" }`; only `file` is a filesystem reference. Record the actual model and whether it was explicitly selected, inherited, or unknown. Treat the child as untrusted until Flect accepts the submission.
+The verifier writes exactly one strict `BlindAgentSubmission` to the Flect-designated external `submission_file`; it does not invoke Flect or write to the repository. Each `affected_scope` item is `{ "file": "exact/visible/path", "symbol": "optional detail or null" }`; only `file` is a filesystem reference. The parent passes only that path to `flect agent submit-echo`; Flect binds the path to the job, validates strict schema and visible scope, and persists the accepted EchoedSpec. Record the actual model and whether it was explicitly selected, inherited, or unknown. Treat the child as untrusted until Flect accepts the submission.
 
 ## Judge spawn
 

@@ -162,6 +162,11 @@ fn accepts_structured_scope_and_exposes_judge_evidence_contract() {
             .iter()
             .any(|rule| rule.as_str().unwrap().contains("evidence_ref"))
     );
+    assert!(
+        judge
+            .instructions
+            .contains("distinct downstream behavioral consequence")
+    );
     assert_eq!(judge.evidence_ref_contract["files"][0]["file"], "app.txt");
     assert!(
         judge.evidence_ref_contract["files"][0]["hunks"]
@@ -177,6 +182,246 @@ fn accepts_structured_scope_and_exposes_judge_evidence_contract() {
     let serialized = serde_json::to_value(&judge).unwrap();
     assert!(serialized.get("submission_schema").is_none());
     assert!(serialized.get("submission_file").is_none());
+}
+
+#[test]
+#[allow(clippy::too_many_lines)]
+fn external_verifier_submission_is_path_only_strict_and_single_use() {
+    let repository = fixture_repository();
+    let workspace = tempfile::tempdir().unwrap();
+    let service = AgentService::with_workspace_root(
+        GitRepository::discover(repository.path()).unwrap(),
+        workspace.path().join("jobs"),
+    )
+    .unwrap();
+    let blind = service.prepare_blind(None, None).unwrap();
+    let submission_file = Path::new(&blind.submission_file);
+
+    assert!(!submission_file.starts_with(repository.path()));
+    assert_ne!(
+        submission_file.parent().unwrap(),
+        Path::new(&blind.workspace)
+    );
+    assert!(submission_file.exists());
+
+    let wrong_directory = tempfile::tempdir().unwrap();
+    let wrong_path = wrong_directory
+        .path()
+        .join(format!("{}.submission.json", blind.job_id));
+    fs::write(&wrong_path, "{}").unwrap();
+    assert!(matches!(
+        service.submit_echo_file(&wrong_path),
+        Err(AgentWorkflowError::SubmissionFileMismatch(_))
+    ));
+
+    fs::write(
+        submission_file,
+        serde_json::to_vec(&BlindAgentSubmission {
+            job_id: "blind_0000000000000000".to_owned(),
+            echoed_spec: EchoedSpec::default(),
+            model: None,
+            model_selection: AgentModelSelection::Unknown,
+        })
+        .unwrap(),
+    )
+    .unwrap();
+    assert!(matches!(
+        service.submit_echo_file(submission_file),
+        Err(AgentWorkflowError::JobMismatch(_))
+    ));
+
+    fs::write(submission_file, "{").unwrap();
+    assert!(matches!(
+        service.submit_echo_file(submission_file),
+        Err(AgentWorkflowError::InvalidState(_))
+    ));
+
+    fs::write(
+        submission_file,
+        format!(r#"{{"job_id":"{}","echoed_spec":{{}}}}"#, blind.job_id),
+    )
+    .unwrap();
+    assert!(matches!(
+        service.submit_echo_file(submission_file),
+        Err(AgentWorkflowError::InvalidState(_))
+    ));
+
+    fs::write(
+        submission_file,
+        format!(
+            r#"{{"job_id":"{}","echoed_spec":{{}},"model":null,"model_selection":"unknown","extra":true}}"#,
+            blind.job_id
+        ),
+    )
+    .unwrap();
+    assert!(matches!(
+        service.submit_echo_file(submission_file),
+        Err(AgentWorkflowError::InvalidState(_))
+    ));
+
+    fs::write(
+        submission_file,
+        serde_json::to_vec(&BlindAgentSubmission {
+            job_id: blind.job_id.clone(),
+            echoed_spec: EchoedSpec {
+                affected_scope: vec![AffectedScope {
+                    file: "invented.rs".to_owned(),
+                    symbol: None,
+                }],
+                ..EchoedSpec::default()
+            },
+            model: None,
+            model_selection: AgentModelSelection::Unknown,
+        })
+        .unwrap(),
+    )
+    .unwrap();
+    assert!(matches!(
+        service.submit_echo_file(submission_file),
+        Err(AgentWorkflowError::UnavailableScope(_))
+    ));
+
+    fs::write(
+        submission_file,
+        serde_json::to_vec(&BlindAgentSubmission {
+            job_id: blind.job_id.clone(),
+            echoed_spec: EchoedSpec {
+                affected_scope: vec![AffectedScope {
+                    file: "app.txt".to_owned(),
+                    symbol: None,
+                }],
+                ..EchoedSpec::default()
+            },
+            model: Some("gpt-5.6-terra".to_owned()),
+            model_selection: AgentModelSelection::Explicit,
+        })
+        .unwrap(),
+    )
+    .unwrap();
+    assert!(service.submit_echo_file(submission_file).is_ok());
+    assert!(matches!(
+        service.submit_echo_file(submission_file),
+        Err(AgentWorkflowError::InvalidJobState(_))
+    ));
+}
+
+#[test]
+#[allow(clippy::too_many_lines)]
+fn side_effect_guidance_requires_a_distinct_consequence_without_duplication() {
+    let repository = fixture_repository();
+    let workspace = tempfile::tempdir().unwrap();
+    let service = AgentService::with_workspace_root(
+        GitRepository::discover(repository.path()).unwrap(),
+        workspace.path().join("jobs"),
+    )
+    .unwrap();
+    let blind = service.prepare_blind(None, None).unwrap();
+    service
+        .submit_echo(BlindAgentSubmission {
+            job_id: blind.job_id.clone(),
+            echoed_spec: EchoedSpec::default(),
+            model: None,
+            model_selection: AgentModelSelection::Unknown,
+        })
+        .unwrap();
+    let judge = service.prepare_reconciliation(&blind.job_id).unwrap();
+    let guidance = judge.evidence_ref_contract["finding_kind_guidance"]["potential_side_effect"]
+        .as_str()
+        .unwrap();
+    let rule = judge.evidence_ref_contract["rules"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|value| value.as_str().unwrap())
+        .find(|value| value.contains("distinct downstream consequence"))
+        .unwrap();
+
+    // A base divergence alone remains only its base category.
+    assert!(guidance.contains("distinct plausible externally observable impact"));
+    // A distinct consequence of either generic base divergence requires both categories.
+    assert!(rule.contains("unrequested change or violated constraint"));
+    assert!(rule.contains("emit both"));
+    // Equivalent wording is not a separate downstream consequence.
+    assert!(guidance.contains("do not treat one category as a substitute"));
+    assert!(
+        judge
+            .instructions
+            .contains("do not emit a potential_side_effect that merely restates")
+    );
+
+    let bundle = service.prepare_blind(None, None).unwrap().bundle;
+    let unrequested = JudgeFinding {
+        kind: FindingCategory::UnrequestedChanges,
+        text: "Add request logging.".to_owned(),
+        evidence_ref: None,
+    };
+    let constraint = JudgeFinding {
+        kind: FindingCategory::ViolatedConstraints,
+        text: "Changes the public input type.".to_owned(),
+        evidence_ref: None,
+    };
+    let downstream = JudgeFinding {
+        kind: FindingCategory::PotentialSideEffects,
+        text: "Callers must migrate to the new input type.".to_owned(),
+        evidence_ref: None,
+    };
+
+    // A base divergence with no distinct consequence has only its base category.
+    let base_only = flect_app::materialize_judge_verdict(
+        JudgeVerdict {
+            alignment: Alignment::Partial,
+            findings: vec![unrequested.clone()],
+            confidence: 0.9,
+        },
+        &bundle,
+    )
+    .unwrap();
+    assert_eq!(
+        base_only.unrequested_changes,
+        vec![unrequested.text.clone()]
+    );
+    assert!(base_only.potential_side_effects.is_empty());
+
+    // Either generic base divergence may be paired with a distinct consequence.
+    for base in [unrequested, constraint] {
+        let verdict = flect_app::materialize_judge_verdict(
+            JudgeVerdict {
+                alignment: Alignment::Partial,
+                findings: vec![base, downstream.clone()],
+                confidence: 0.9,
+            },
+            &bundle,
+        )
+        .unwrap();
+        assert_eq!(
+            verdict.potential_side_effects,
+            vec![downstream.text.clone()]
+        );
+    }
+
+    // Equivalent wording is a duplicate restatement, not a downstream consequence.
+    assert!(
+        flect_app::materialize_judge_verdict(
+            JudgeVerdict {
+                alignment: Alignment::Partial,
+                findings: vec![
+                    JudgeFinding {
+                        kind: FindingCategory::UnrequestedChanges,
+                        text: "Logs each request key".to_owned(),
+                        evidence_ref: None,
+                    },
+                    JudgeFinding {
+                        kind: FindingCategory::PotentialSideEffects,
+                        text: " logs   each REQUEST key ".to_owned(),
+                        evidence_ref: None,
+                    },
+                ],
+                confidence: 0.9,
+            },
+            &bundle,
+        )
+        .is_err()
+    );
 }
 
 #[test]

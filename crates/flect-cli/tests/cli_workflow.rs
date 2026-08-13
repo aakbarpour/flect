@@ -172,8 +172,7 @@ fn direct_judge_submission_is_strict_and_does_not_use_chat_text() {
     assert_success(&blind);
     let blind: serde_json::Value = serde_json::from_slice(&blind.stdout).unwrap();
     let blind_job_id = blind["job_id"].as_str().unwrap();
-    let directory = tempfile::tempdir().unwrap();
-    let echo = directory.path().join("echo.json");
+    let echo = std::path::PathBuf::from(blind["submission_file"].as_str().unwrap());
     fs::write(
         &echo,
         format!(

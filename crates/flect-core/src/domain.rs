@@ -423,7 +423,7 @@ pub enum AgentModelSelection {
 }
 
 /// Trusted handoff prepared for a blind external reasoner.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct BlindAgentJob {
     pub version: u32,
@@ -431,6 +431,8 @@ pub struct BlindAgentJob {
     pub run_id: String,
     pub isolation: IsolationLevel,
     pub workspace: String,
+    /// Flect-owned writable path where the verifier writes one strict submission.
+    pub submission_file: String,
     pub instructions: String,
     pub bundle: BlindBundle,
     pub echoed_spec_schema: serde_json::Value,
@@ -439,7 +441,7 @@ pub struct BlindAgentJob {
 }
 
 /// Typed response submitted by a blind reasoner.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct BlindAgentSubmission {
     pub job_id: String,

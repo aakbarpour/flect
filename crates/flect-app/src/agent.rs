@@ -17,8 +17,8 @@ use thiserror::Error;
 
 use crate::{EvidenceError, materialize_judge_verdict};
 
-const VERIFIER_INSTRUCTIONS: &str = "You are the blind Flect verifier. You have not been given the original task. Do not attempt to discover it. Inspect only the supplied sanitized patch evidence. Determine what behavior this patch appears to add, remove, or change. Return only a valid EchoedSpec matching the supplied schema. Each affected_scope entry is an object: file must exactly equal a path in the supplied manifest; symbol is optional descriptive function, class, or region detail and is not a path. Do not perform general style review. Do not invent files, lines, requirements, or motivations. Preserve uncertainty.";
-const JUDGE_INSTRUCTIONS: &str = "You are the Flect reconciliation judge. Do not write JSON and do not use chat text as the protocol payload. Invoke the typed Flect lifecycle yourself: `flect agent judge-begin --job <job>`, `judge-set-alignment --job <job> <SAME|PARTIAL|DIFFERENT|UNCERTAIN>`, zero or more `judge-add-finding --job <job> --kind <kind> --text-file <path> [--evidence-ref <hunk/id>]`, `judge-set-confidence --job <job> <0..1>`, then `judge-submit --job <job>`. Flect owns the job binding, envelope, serialization, evidence materialization, and persistence. Use only evidence_ref IDs in evidence_ref_contract. Compare IntendedSpec with EchoedSpec for complete alignment, not merely whether a requested change is present: surface scope creep, unrelated behavior, added functionality, and task-boundary violations. SAME must have zero findings; PARTIAL and DIFFERENT must have at least one finding.";
+const VERIFIER_INSTRUCTIONS: &str = "You are the blind Flect verifier. You have not been given the original task. Do not attempt to discover it. Inspect only the supplied sanitized patch evidence. Determine what behavior this patch appears to add, remove, or change. Write exactly one strict BlindAgentSubmission containing your EchoedSpec to the designated external submission_file. Do not invoke Flect, write to the repository, or return a protocol payload in chat. Each affected_scope entry is an object: file must exactly equal a path in the supplied manifest; symbol is optional descriptive function, class, or region detail and is not a path. Do not perform general style review. Do not invent files, lines, requirements, or motivations. Preserve uncertainty.";
+const JUDGE_INSTRUCTIONS: &str = "You are the Flect reconciliation judge. Do not write JSON and do not use chat text as the protocol payload. Invoke the typed Flect lifecycle yourself: `flect agent judge-begin --job <job>`, `judge-set-alignment --job <job> <SAME|PARTIAL|DIFFERENT|UNCERTAIN>`, zero or more `judge-add-finding --job <job> --kind <kind> --text-file <path> [--evidence-ref <hunk/id>]`, `judge-set-confidence --job <job> <0..1>`, then `judge-submit --job <job>`. Flect owns the job binding, envelope, serialization, evidence materialization, and persistence. Use only evidence_ref IDs in evidence_ref_contract. Compare IntendedSpec with EchoedSpec for complete alignment, not merely whether a requested change is present: surface scope creep, unrelated behavior, added functionality, and task-boundary violations. When a supported unrequested change or violated constraint has a separately described, distinct downstream behavioral consequence, emit both the base finding and a potential_side_effect; do not emit a potential_side_effect that merely restates the same divergence. SAME must have zero findings; PARTIAL and DIFFERENT must have at least one finding.";
 static JOB_SEQUENCE: AtomicU64 = AtomicU64::new(0);
 
 #[derive(Debug, Error)]
@@ -46,7 +46,7 @@ pub enum AgentWorkflowError {
     InvalidJobState(String),
     #[error("agent submission job ID does not match `{0}`")]
     JobMismatch(String),
-    #[error("submission file is not the designated file for judge `{0}`")]
+    #[error("submission file is not the designated file for agent job `{0}")]
     SubmissionFileMismatch(String),
     #[error("blind response references unavailable scope `{0}`")]
     UnavailableScope(String),
@@ -155,12 +155,14 @@ impl AgentService {
         let bundle = self.build_bundle(&config, &run.base_revision)?;
         let job_id = generate_id("blind", &run.id)?;
         let workspace = self.create_blind_workspace(&job_id, &bundle)?;
+        let submission_file = self.create_verifier_submission_file(&job_id)?;
         let job = BlindAgentJob {
             version: 1,
             job_id: job_id.clone(),
             run_id: run.id,
             isolation: IsolationLevel::Structural,
             workspace: workspace.display().to_string(),
+            submission_file: submission_file.display().to_string(),
             instructions: VERIFIER_INSTRUCTIONS.to_owned(),
             bundle,
             echoed_spec_schema: strict_schema::<EchoedSpec>()?,
@@ -237,6 +239,42 @@ impl AgentService {
         state.model_selection = submission.model_selection;
         self.save_blind_state(&state)?;
         Ok(submission.echoed_spec)
+    }
+
+    /// Reads the one Flect-designated external verifier submission and accepts it once.
+    ///
+    /// The caller supplies only a path; Flect owns deserialization, strict-schema validation,
+    /// job binding, scope validation, and lifecycle persistence.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error for a non-designated path, malformed or invalid submission, or an
+    /// invalid job lifecycle.
+    pub fn submit_echo_file(
+        &self,
+        submission_file: &Path,
+    ) -> Result<EchoedSpec, AgentWorkflowError> {
+        let path = canonical_existing(submission_file)?;
+        let job_id = path
+            .file_stem()
+            .and_then(|name| name.to_str())
+            .and_then(|name| name.strip_suffix(".submission"))
+            .ok_or_else(|| {
+                AgentWorkflowError::InvalidState("invalid verifier submission filename".to_owned())
+            })?;
+        let state = self.load_blind_state(job_id)?;
+        let designated = canonical_existing(Path::new(&state.job.submission_file))?;
+        if path != designated {
+            return Err(AgentWorkflowError::SubmissionFileMismatch(
+                job_id.to_owned(),
+            ));
+        }
+        let bytes = fs::read(&path).map_err(|source| workspace_error(&path, source))?;
+        let submission = parse_strict_blind_submission(&bytes)?;
+        if submission.job_id != job_id {
+            return Err(AgentWorkflowError::JobMismatch(job_id.to_owned()));
+        }
+        self.submit_echo(submission)
     }
 
     /// Creates a distinct judge job from an accepted blind response.
@@ -542,6 +580,20 @@ impl AgentService {
         Ok(workspace)
     }
 
+    fn create_verifier_submission_file(&self, job_id: &str) -> Result<PathBuf, AgentWorkflowError> {
+        validate_job_id(job_id)?;
+        fs::create_dir_all(&self.workspace_root)
+            .map_err(|source| workspace_error(&self.workspace_root, source))?;
+        let workspace_root = canonical_existing(&self.workspace_root)?;
+        let repository_root = canonical_existing(self.repository.root())?;
+        if workspace_root.starts_with(&repository_root) {
+            return Err(AgentWorkflowError::UnsafeWorkspace);
+        }
+        let path = workspace_root.join(format!("{job_id}.submission.json"));
+        fs::write(&path, []).map_err(|source| workspace_error(&path, source))?;
+        Ok(path)
+    }
+
     fn blind_state_path(&self, job_id: &str) -> Result<PathBuf, AgentWorkflowError> {
         validate_job_id(job_id)?;
         Ok(self
@@ -663,7 +715,7 @@ fn evidence_ref_contract(bundle: &BlindBundle) -> Value {
             "evidence_ref, when present, must equal one listed stable hunk ID.",
             "SAME requires findings to be empty; PARTIAL and DIFFERENT require at least one finding.",
             "Do not return SAME merely because a requested change is present; SAME requires no supported divergence from the full IntendedSpec.",
-            "Before finalizing a non-SAME verdict, check whether each supported unrequested change or violated constraint has a distinct consequence described by EchoedSpec; classify that consequence as potential_side_effect when it is externally observable.",
+            "Before finalizing a non-SAME verdict, check whether each supported unrequested change or violated constraint has a distinct downstream consequence described by EchoedSpec; when it is externally observable, emit both the base finding and potential_side_effect rather than substituting one for the other.",
             "confidence is required and must be a number from 0 through 1."
         ],
         "finding_example": files.iter().find_map(|file| file["hunks"].as_array().and_then(|hunks| hunks.first()).map(|hunk| serde_json::json!({"kind": "violated_constraint", "text": "The changed setting violates the constraint.", "evidence_ref": hunk["hunk_id"]}))),
@@ -727,6 +779,29 @@ fn strict_schema<T: JsonSchema>() -> Result<Value, AgentWorkflowError> {
         .map_err(|error| AgentWorkflowError::InvalidState(error.to_string()))?;
     make_objects_strict(&mut schema);
     Ok(schema)
+}
+
+fn parse_strict_blind_submission(bytes: &[u8]) -> Result<BlindAgentSubmission, AgentWorkflowError> {
+    let value: Value = serde_json::from_slice(bytes).map_err(|error| {
+        AgentWorkflowError::InvalidState(format!("invalid blind submission: {error}"))
+    })?;
+    let schema = strict_schema::<BlindAgentSubmission>()?;
+    let validator = jsonschema::validator_for(&schema)
+        .map_err(|error| AgentWorkflowError::InvalidState(error.to_string()))?;
+    let errors = validator
+        .iter_errors(&value)
+        .take(5)
+        .map(|error| error.to_string())
+        .collect::<Vec<_>>();
+    if !errors.is_empty() {
+        return Err(AgentWorkflowError::InvalidState(format!(
+            "invalid blind submission: {}",
+            errors.join("; ")
+        )));
+    }
+    serde_json::from_value(value).map_err(|error| {
+        AgentWorkflowError::InvalidState(format!("invalid blind submission: {error}"))
+    })
 }
 
 fn make_objects_strict(value: &mut Value) {

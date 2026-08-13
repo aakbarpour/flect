@@ -464,8 +464,7 @@ fn agent(command: &AgentCommand, _json_output: bool) -> Result<()> {
                 .map_err(to_report)?,
         ),
         AgentCommand::SubmitEcho { submission } => {
-            let submission = read_json_file(submission)?;
-            serde_json::to_value(service.submit_echo(submission).map_err(to_report)?)
+            serde_json::to_value(service.submit_echo_file(submission).map_err(to_report)?)
         }
         AgentCommand::PrepareReconciliation { blind_job } => serde_json::to_value(
             service
