@@ -2,6 +2,16 @@ name: Release
 
 on:
   workflow_dispatch:
+  pull_request:
+    branches: [main]
+    paths:
+      - ".github/workflows/release.yml"
+      - "install.sh"
+      - "install.ps1"
+      - "tools/package-release.sh"
+      - "tools/package-release.ps1"
+      - "README.md"
+      - "docs/installation.md"
   push:
     tags:
       - "v[0-9]+.[0-9]+.[0-9]+"
@@ -33,18 +43,23 @@ jobs:
           - target: x86_64-unknown-linux-gnu
             os: ubuntu-latest
             archive: tar.gz
+            installer_smoke: true
           - target: aarch64-unknown-linux-gnu
             os: ubuntu-latest
             archive: tar.gz
+            installer_smoke: false
           - target: x86_64-apple-darwin
             os: macos-15-intel
             archive: tar.gz
+            installer_smoke: true
           - target: aarch64-apple-darwin
             os: macos-14
             archive: tar.gz
+            installer_smoke: true
           - target: x86_64-pc-windows-msvc
             os: windows-latest
             archive: zip
+            installer_smoke: true
     runs-on: ${{ matrix.os }}
     env:
       RELEASE_VERSION: ${{ startsWith(github.ref, 'refs/tags/') && github.ref_name || format('dev-{0}', github.run_number) }}
@@ -82,6 +97,25 @@ jobs:
           for expected in flect LICENSE README.md; do
             printf '%s\n' "$listing" | grep -Fx "flect-${RELEASE_VERSION}-${{ matrix.target }}/$expected"
           done
+      - name: Smoke-test local Unix installer
+        if: runner.os != 'Windows' && matrix.installer_smoke
+        shell: bash
+        run: |
+          archive="dist/flect-${RELEASE_VERSION}-${{ matrix.target }}.tar.gz"
+          checksum="$RUNNER_TEMP/SHA256SUMS"
+          sha256sum "$archive" > "$checksum"
+          install_dir="$RUNNER_TEMP/flect-install"
+          sh ./install.sh --version latest --bin-dir "$install_dir" --archive "$archive" --checksum-file "$checksum"
+          "$install_dir/flect" --version
+          if sh ./install.sh --archive "$archive" >/dev/null 2>&1; then
+            echo 'installer accepted an incomplete offline input pair'
+            exit 1
+          fi
+          printf '%064d  %s\n' 0 "$(basename "$archive")" > "$RUNNER_TEMP/BAD-SHA256SUMS"
+          if sh ./install.sh --version latest --bin-dir "$install_dir" --archive "$archive" --checksum-file "$RUNNER_TEMP/BAD-SHA256SUMS" >/dev/null 2>&1; then
+            echo 'installer accepted an invalid checksum'
+            exit 1
+          fi
       - name: Validate Windows archive contents
         if: runner.os == 'Windows'
         shell: powershell
@@ -94,6 +128,33 @@ jobs:
             $name = "flect-$env:RELEASE_VERSION-${{ matrix.target }}/$expected"
             if ($entries -notcontains $name) { throw "archive missing $name" }
           }
+      - name: Smoke-test local Windows installer
+        if: runner.os == 'Windows' && matrix.installer_smoke
+        shell: powershell
+        run: |
+          $archive = "dist/flect-$env:RELEASE_VERSION-${{ matrix.target }}.zip"
+          $checksum = Join-Path $env:RUNNER_TEMP 'SHA256SUMS'
+          $hash = (Get-FileHash -LiteralPath $archive -Algorithm SHA256).Hash.ToLowerInvariant()
+          "$hash  $(Split-Path -Leaf $archive)" | Set-Content -LiteralPath $checksum -Encoding ascii
+          $installDir = Join-Path $env:RUNNER_TEMP 'flect-install'
+          & .\install.ps1 -Version latest -BinDir $installDir -Archive $archive -ChecksumFile $checksum
+          & (Join-Path $installDir 'flect.exe') --version
+          try {
+            & .\install.ps1 -Archive $archive
+            throw 'installer accepted an incomplete offline input pair'
+          }
+          catch {
+            if ($_.Exception.Message -like '*incomplete offline input pair*') { throw }
+          }
+          $badChecksum = Join-Path $env:RUNNER_TEMP 'BAD-SHA256SUMS'
+          ('0' * 64 + "  $(Split-Path -Leaf $archive)") | Set-Content -LiteralPath $badChecksum -Encoding ascii
+          try {
+            & .\install.ps1 -Version latest -BinDir $installDir -Archive $archive -ChecksumFile $badChecksum
+            throw 'installer accepted an invalid checksum'
+          }
+          catch {
+            if ($_.Exception.Message -like '*invalid checksum*') { throw }
+          }
       - uses: actions/upload-artifact@v7
         with:
           name: flect-${{ matrix.target }}
@@ -104,19 +165,22 @@ jobs:
     name: checksums
     needs: build
     runs-on: ubuntu-latest
-    permissions:
-      contents: write
     steps:
+      - uses: actions/checkout@v7
       - uses: actions/download-artifact@v8
         with:
           path: dist
           merge-multiple: true
+      - name: Add installer scripts
+        shell: bash
+        run: |
+          cp install.sh install.ps1 dist/
       - name: Generate and verify exact SHA256SUMS
         working-directory: dist
         shell: bash
         run: |
-          mapfile -t artifacts < <(find . -maxdepth 1 -type f \( -name 'flect-*.tar.gz' -o -name 'flect-*.zip' \) -printf '%f\n' | sort)
-          test "${#artifacts[@]}" -eq 5
+          mapfile -t artifacts < <(find . -maxdepth 1 -type f \( -name 'flect-*.tar.gz' -o -name 'flect-*.zip' -o -name 'install.sh' -o -name 'install.ps1' \) -printf '%f\n' | sort)
+          test "${#artifacts[@]}" -eq 7
           sha256sum "${artifacts[@]}" > SHA256SUMS
           test "$(wc -l < SHA256SUMS)" -eq "${#artifacts[@]}"
           sha256sum --check SHA256SUMS
@@ -124,8 +188,20 @@ jobs:
         with:
           name: flect-release
           path: dist/*
+
+  publish:
+    name: publish GitHub release
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: checksums
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          name: flect-release
+          path: dist
       - name: Publish GitHub release
-        if: startsWith(github.ref, 'refs/tags/v')
         uses: softprops/action-gh-release@v3
         with:
           fail_on_unmatched_files: true
