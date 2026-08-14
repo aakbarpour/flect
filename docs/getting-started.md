@@ -1,6 +1,6 @@
 # Getting started
 
-Flect has one trusted Rust application layer and three entry points: direct CLI/API use, a Codex Skill, and a structured MCP server. API mode delegates semantic stages to the configured Responses-compatible endpoint. Codex-native mode asks the active runtime to spawn a fresh verifier and a different fresh judge, while Flect remains authoritative for sanitization, schemas, lifecycle, evidence validation, and persistence.
+Flect v0.1.0 is released. **Tests pass. But did your coding agent build what you actually asked for?** Flect is an independent second opinion for AI-written patches. It has one trusted Rust application layer with direct CLI/API use, a Codex repository plugin that bundles the Skill and stdio MCP configuration, and manual Skill/MCP fallbacks. API mode delegates semantic stages to the configured Responses-compatible endpoint. Codex-native mode asks the active runtime to spawn a fresh verifier and a different fresh judge, while Flect remains authoritative for sanitization, schemas, lifecycle, evidence validation, and persistence.
 
 ## Direct API mode
 
@@ -83,6 +83,5 @@ Run `flect inspect` or `flect verify --dry-run` before a remote request. Dry-run
 - The Responses-style protocol is implemented; Chat Completions compatibility is not yet implemented.
 - Codex-native mode establishes fresh conversation handoff only when the runtime actually supports it; Flect reports its local resource boundary as structural.
 - A configured API-backed backward request is `strict` with respect to parent conversation access, subject to the provider and source-content caveats in the privacy model.
-- The ten-case evaluation suite supports regression checks and directional comparison, not broad effectiveness claims.
-- No real-model benchmark result or first public release has been published yet.
+- Flect is an independent second opinion, not a correctness oracle. Review the patch, tests, and Flect's evidence together.
 - Native archives exist as a release workflow; Homebrew, Scoop, and other feeds are intentionally deferred.

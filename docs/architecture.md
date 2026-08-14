@@ -47,4 +47,4 @@ Run and result JSON plus the `latest` pointer are written through same-directory
 
 ## Deliberate limits
 
-Repository-copy context, model repair loops beyond one bounded fallback, and automated CI verdict enforcement are deliberate non-goals for v0.1.0. Deterministic Benchmark v1 infrastructure and release packaging exist, but their presence is not an effectiveness claim or a published model-backed benchmark result.
+Repository-copy context, model repair loops beyond one bounded fallback, and automated CI verdict enforcement are deliberate non-goals for v0.1.0. Flect is an independent second opinion, not a correctness oracle; release packaging does not change that limitation.

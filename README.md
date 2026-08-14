@@ -5,9 +5,9 @@
 [![CI](https://github.com/aakbarpour/flect/actions/workflows/ci.yml/badge.svg)](https://github.com/aakbarpour/flect/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
-Flect is an independent intent-verification layer for AI-written code. It reconstructs what a patch appears to do without showing the verifier the original task, then compares that reconstruction with the requested behavior.
+Flect is an independent second opinion for AI-written patches. It reconstructs what a patch appears to do without showing the verifier the original task, then compares that reconstruction with the requested behavior.
 
-Passing tests is necessary, but it does not prove that an agent built the right thing. Flect adds a separate signal for missing requirements, violated constraints, scope creep, and wrong-direction fixes.
+**Tests pass. But did your coding agent build what you actually asked for?** Flect adds a separate signal for missing requirements, violated constraints, scope creep, and wrong-direction fixes. It is not a correctness oracle: review the patch, tests, and Flect's evidence together.
 
 ## Contents
 
@@ -169,22 +169,22 @@ All integration paths use the same Flect application and policy. Follow [getting
 - `flect skill install|status|uninstall` — manage the project-local Codex Skill.
 - `flect mcp` — serve Flect tools over stdio MCP.
 
-Every command supports `--json`; use `--verbose` for diagnostics. Advanced evaluation, cleanup, routing, and protocol details live in the linked documentation.
+Every command supports `--json`; use `--verbose` for diagnostics. Advanced cleanup, routing, and protocol details live in the linked documentation.
 
 ## Documentation
 
 - [Getting started](docs/getting-started.md) · [Installation](docs/installation.md)
 - [Architecture](docs/architecture.md) · [Blind verification](docs/blind-verification.md)
 - [Privacy model](docs/privacy.md) · [Codex MCP integration](docs/mcp.md)
-- [Model routing and cost estimates](docs/model-routing.md) · [Evaluation methodology](docs/evaluation.md)
+- [Model routing and cost estimates](docs/model-routing.md)
 - [Research and attribution](docs/research.md) · [Security policy](SECURITY.md)
 - [Contributing](CONTRIBUTING.md) · [Project governance](docs/governance.md)
 
 ## Project status and limitations
 
-Flect is pre-1.0 software. The verification pipeline, Codex Skill, Responses-compatible API mode, stdio MCP adapter, native release archives, and bootstrap installers are implemented; interfaces and defaults may evolve.
+Flect v0.1.0 is released. The verification pipeline, Codex repository plugin, bundled Codex Skill, Responses-compatible API mode, stdio MCP adapter, native release archives, and bootstrap installers are implemented; interfaces and defaults may evolve while Flect remains pre-1.0 software.
 
-The API transport currently implements the Responses-style protocol; Chat Completions compatibility is not implemented. Codex-native verification depends on fresh no-parent-context handoffs, and its boundary is structural rather than a security sandbox. See [installation](docs/installation.md) for release availability.
+The API transport currently implements the Responses-style protocol; Chat Completions compatibility is not implemented. Codex-native verification depends on fresh no-parent-context handoffs, and its boundary is structural rather than a security sandbox. See [installation](docs/installation.md) for the v0.1.0 release archives and installation paths.
 
 ## Attribution and license
 
