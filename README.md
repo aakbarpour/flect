@@ -65,37 +65,58 @@ Flect records forward intent, independently reconstructs patch intent, and recon
 
 Use the Codex Skill for the shortest path from an existing Git repository to independent verification.
 
-1. Install Flect from source:
+1. Download and inspect the installer, then run it.
+
+   On Linux or macOS:
 
    ```console
-   git clone https://github.com/aakbarpour/flect.git
-   cd flect
-   cargo install --locked --path crates/flect-cli
+   curl --fail --location --proto '=https' --proto-redir '=https' \
+     https://github.com/aakbarpour/flect/releases/latest/download/install.sh \
+     --output install.sh
+   sed -n '1,260p' install.sh
+   sh install.sh
+   ```
+
+   On Windows PowerShell:
+
+   ```powershell
+   Invoke-WebRequest `
+     -Uri https://github.com/aakbarpour/flect/releases/latest/download/install.ps1 `
+     -OutFile .\install.ps1
+   Get-Content .\install.ps1
+   powershell -NoProfile -ExecutionPolicy Bypass -File .\install.ps1
+   ```
+
+   The installers verify `SHA256SUMS`, install into a user-local directory, and never change your PATH automatically. They print the exact PATH instruction when the destination is not already available.
+
+2. Confirm the executable:
+
+   ```console
    flect --version
    ```
 
-2. Enter the Git repository where an agent will make a change:
+3. Enter the Git repository where an agent will make a change:
 
    ```console
    cd /path/to/your/repository
    ```
 
-3. Initialize project-local configuration:
+4. Initialize project-local configuration:
 
    ```console
    flect init
    ```
 
-4. Install and check the project-local Skill:
+5. Install and check the project-local Skill:
 
    ```console
    flect skill install
    flect skill status
    ```
 
-5. Ask Codex: **“Use Flect verification for this implementation.”** Flect captures the task, prepares the blind handoff, and validates the structured results.
+6. Ask Codex: **“Use Flect verification for this implementation.”** Flect captures the task, prepares the blind handoff, and validates the structured results.
 
-6. Review the verdict and follow its recommended action. Use `flect inspect` or `flect verify --dry-run` to inspect the request boundary first.
+7. Review the verdict and follow its recommended action. Use `flect inspect` or `flect verify --dry-run` to inspect the request boundary first.
 
 See [installation](docs/installation.md) for archives, checksums, Windows instructions, and source-install details; see [getting started](docs/getting-started.md) for credentials, providers, troubleshooting, and the full lifecycle.
 
@@ -151,7 +172,7 @@ Every command supports `--json`; use `--verbose` for diagnostics. Advanced evalu
 
 ## Project status and limitations
 
-Flect is pre-1.0 software. The verification pipeline, Codex Skill, Responses-compatible API mode, stdio MCP adapter, and native release workflow are implemented; interfaces and defaults may evolve.
+Flect is pre-1.0 software. The verification pipeline, Codex Skill, Responses-compatible API mode, stdio MCP adapter, native release archives, and bootstrap installers are implemented; interfaces and defaults may evolve.
 
 The API transport currently implements the Responses-style protocol; Chat Completions compatibility is not implemented. Codex-native verification depends on fresh no-parent-context handoffs, and its boundary is structural rather than a security sandbox. See [installation](docs/installation.md) for release availability.
 
