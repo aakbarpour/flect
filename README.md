@@ -5,234 +5,158 @@
 [![CI](https://github.com/aakbarpour/flect/actions/workflows/ci.yml/badge.svg)](https://github.com/aakbarpour/flect/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
-Coding agents usually verify implementations while knowing what they were supposed to implement. Flect removes that anchor.
+Flect is an independent intent-verification layer for AI-written code. It reconstructs what a patch appears to do without showing the verifier the original task, then compares that reconstruction with the requested behavior.
 
-It gives an independent verifier the patch without the original task, reconstructs what the implementation actually appears to do, then compares that reconstructed intent with what you requested.
+Passing tests is necessary, but it does not prove that an agent built the right thing. Flect adds a separate signal for missing requirements, violated constraints, scope creep, and wrong-direction fixes.
 
-Tests ask whether the code works. Flect asks whether you built the right thing.
+## Contents
 
-> **Project status:** The verification pipeline, evaluation suite, packaging, Codex Skill, and stdio MCP workflows are implemented. Flect supports deterministic offline tests, a Responses-compatible API mode, and a Codex-native mode with fresh verifier and judge handoffs. A retained 20-case Codex-native engineering run is published below; it is not a 40-case release claim or a population-level effectiveness study.
+- [Why Flect](#why-flect)
+- [Research evidence](#-research-evidence)
+- [How it works](#how-it-works)
+- [Quick start](#-quick-start)
+- [Choose an integration](#choose-an-integration)
+- [Understand the verdicts](#understand-the-verdicts)
+- [Trust and privacy](#-trust-and-privacy)
+- [CLI reference](#cli-reference)
+- [Documentation](#documentation)
+- [Project status and limitations](#project-status-and-limitations)
+- [Attribution and license](#attribution-and-license)
 
-## Benchmark snapshot
+## Why Flect
 
-The latest retained Codex-native run covers the first 20 cases of the frozen 40-case suite on corrected source semantics. It used a fresh Terra verifier and a separate fresh Terra judge per case, with explicit no-parent-context handoffs and the typed filesystem protocol.
+Coding agents can produce a plausible patch while solving a nearby problem, omitting a requirement, or changing behavior outside the request. Flect makes that mismatch visible before the patch is treated as complete.
 
-| Signal | Result |
-| --- | ---: |
-| Cases attempted / persisted | **20 / 19** |
-| Exact verdict accuracy (attempted) | **13/20 = 65.00%** |
-| Exact verdict accuracy (completed) | **13/19 = 68.42%** |
-| Good-patch acceptance | **3/4 = 75.00%** |
-| Bad-patch detection (completed) | **15/15 = 100.00%** |
-| Category exact match | **11/19 = 57.89%** |
-| Category micro precision / recall | **76.00% / 79.17%** |
-| Contamination failures | **0** |
-| Semantic retries / repair / normalization | **0 / 0 / 0** |
+- Captures the requested task before implementation changes can bias review.
+- Builds a focused, sanitized view of the patch and relevant context.
+- Uses a blind reconstruction that has no task, conversation, forward specification, task-bearing Git metadata, or primary-agent reasoning.
+- Compares intended behavior with apparent patch intent and returns an actionable verdict.
+- Works through the Codex Skill, a Responses-compatible API, or a stdio MCP server.
 
-The run is deliberately reported fail-closed: one judge submission (`canonical-05`) was rejected for an invalid side-effect disposition and remains unpersisted in the raw artifact. The result therefore should not be read as a perfect score or as evidence that Flect catches every semantic mismatch. See the complete [20-case report](benchmarks/codex-native-corrected-20.md) and [machine-readable provenance](benchmarks/codex-native-corrected-20.json).
+## 📈 Research evidence
 
-Frozen provenance: production `b61e5d6`, harness `a4363ce`, suite SHA-256 `141DDF6D...B6FD36E`. The full preflight materialized 37 cases with native Git, 2 with structural fixture hunks, and 1 with the disclosed `flect-binary-surrogate-v1` opaque binary surrogate.
+Flect is inspired by RETRACE, a bidirectional reconstruct-and-verify method for coding agents. The paper reports these results on its own SWE-bench Verified studies:
+
+| Agent/model | Baseline | With RETRACE | Uplift |
+| --- | ---: | ---: | ---: |
+| mini-SWE-agent + GPT-5-mini | 56.2% | 63.2% | **+7.0 percentage points** |
+| mini-SWE-agent + MiniMax M2.5 | 75.8% | 79.4% | **+3.6 percentage points** |
+
+These are **RETRACE results, not Flect benchmarks**. They are evidence for the verification pattern that motivates Flect, not a guarantee of the same uplift in another product or project. Read the [paper](https://arxiv.org/abs/2608.08950) and Flect’s [research and attribution notes](docs/research.md) for methodology, authorship, and limitations.
 
 ## How it works
 
-```text
-Original task ──> IntendedSpec ───────────────┐
-                                              ├──> reconciliation ──> verdict
-Patch ──> BlindGuard ──> blind reconstruction┘
-          (no original task)
+```mermaid
+flowchart LR
+    task["Original task"] --> spec["IntendedSpec"]
+    patch["Implementation patch"] --> guard["BlindGuard<br/>task-free evidence"]
+    guard --> echo["EchoedSpec"]
+    spec --> reconcile["Reconciliation"]
+    echo --> reconcile
+    reconcile --> same["SAME<br/>matches request"]
+    reconcile --> partial["PARTIAL<br/>revise patch"]
+    reconcile --> different["DIFFERENT<br/>wrong direction"]
+    reconcile --> uncertain["UNCERTAIN<br/>inspect boundary"]
 ```
 
-BlindGuard makes task separation structural: the bundle type contains patch evidence, selected context, a manifest, and a blindness report—no task, conversation, forward spec, branch name, or commit message. It cannot guarantee that source code or comments do not themselves reveal task semantics; Flect reports that limitation rather than implying a cryptographic guarantee.
+Flect records forward intent, independently reconstructs patch intent, and reconciles both with evidence.
 
-## Choose a mode
+## 🚀 Quick start
 
-Direct API mode:
+Use the Codex Skill for the shortest path from an existing Git repository to independent verification.
 
-```console
-flect init
-# Defaults: gpt-5.6-luna primary, with one gpt-5.6-terra fallback.
-# Override either model only when your project needs a different route.
-flect config set runner.kind api
-flect start --task "Fix token expiry without changing legacy auth"
-# code and normal tests
-flect verify --dry-run
-flect verify
-```
+1. Install Flect from source:
 
-Codex Skill mode:
+   ```console
+   git clone https://github.com/aakbarpour/flect.git
+   cd flect
+   cargo install --locked --path crates/flect-cli
+   flect --version
+   ```
 
-```console
-flect init
-flect skill install
-# Ask Codex: Use Flect verification for this implementation.
-```
+2. Enter the Git repository where an agent will make a change:
 
-When the active Codex runtime exposes fresh subagents, the Skill uses a no-parent-context verifier followed by a different fresh reconciliation judge. Flect supplies sanitized read-only resources and validates both typed submissions. This is reported as `structural` isolation because a shared runtime filesystem is not an operating-system sandbox.
+   ```console
+   cd /path/to/your/repository
+   ```
 
-Codex MCP mode:
+3. Initialize project-local configuration:
 
-```console
-codex mcp add flect -- /absolute/path/to/flect mcp
-codex mcp list
-```
+   ```console
+   flect init
+   ```
 
-See the copyable [getting-started workflows](docs/getting-started.md) for credentials, custom providers, privacy checks, verdict handling, and current limitations.
+4. Install and check the project-local Skill:
 
-## Build
+   ```console
+   flect skill install
+   flect skill status
+   ```
 
-Flect uses stable Rust and the 2024 edition.
+5. Ask Codex: **“Use Flect verification for this implementation.”** Flect captures the task, prepares the blind handoff, and validates the structured results.
 
-```console
-cargo build --release
-cargo test --workspace
-```
+6. Review the verdict and follow its recommended action. Use `flect inspect` or `flect verify --dry-run` to inspect the request boundary first.
 
-The binary is `target/release/flect` (`flect.exe` on Windows).
+See [installation](docs/installation.md) for archives, checksums, Windows instructions, and source-install details; see [getting started](docs/getting-started.md) for credentials, providers, troubleshooting, and the full lifecycle.
 
-Prebuilt archives for five native targets, accompanied by `SHA256SUMS`, are produced by tagged releases. See [installation](docs/installation.md) for target selection, checksum verification, and source installation.
+## Choose an integration
 
-## Quick start
+| Mode | Best for | Start here |
+| --- | --- | --- |
+| **Codex Skill** | Developers already working in Codex | `flect skill install` and ask Codex to use Flect |
+| **Responses-compatible API** | Automated or provider-configured workflows | Configure `runner.kind = "api"`, then use `flect start` and `flect verify` |
+| **stdio MCP** | Hosts that discover tools through MCP | Register `flect mcp` with the host |
 
-Initialize configuration explicitly. This is the only command that adds `.flect/` to `.gitignore`.
+All three entry points use the same Flect application and policy. Follow [getting started](docs/getting-started.md), [model routing](docs/model-routing.md), and [MCP](docs/mcp.md) for configuration details.
 
-```console
-$ flect init
-Flect initialized
+## Understand the verdicts
 
-Repository  /work/example
-Config      /work/example/flect.toml (created)
-State       .flect/ (added to .gitignore)
-```
+| Verdict | Meaning | Recommended action |
+| --- | --- | --- |
+| `SAME` | The patch’s apparent intent matches the requested intent. | Review normally and merge through your usual process. |
+| `PARTIAL` | The patch addresses part of the request but misses a requirement or constraint. | Revise the patch, then verify again. |
+| `DIFFERENT` | The patch appears to solve a different problem or materially changes the requested behavior. | Stop and reassess the implementation against the task. |
+| `UNCERTAIN` | Evidence, isolation, provider output, or confidence is insufficient. | Inspect the boundary and configuration; do not treat it as success. |
 
-Capture the task before implementation changes can bias forward analysis:
+## 🔒 Trust and privacy
 
-```console
-$ flect start --task "Reject expired refresh tokens without removing the legacy fallback"
-Flect run created
+- Git capture is read-only: Flect does not commit, stage, reset, checkout, change branches, or edit Git configuration.
+- BlindGuard’s strict backward request has no field for the original task, forward specification, conversation, task-bearing Git metadata, or primary-agent reasoning.
+- Common secret paths, private keys, credential files, binaries, build output, vendored code, and dependency directories are excluded before bundle construction. Source and comments can still reveal intent, so inspect the exact bundle when privacy matters.
+- Credentials come from the configured environment variable. Flect does not persist credential values, authorization headers, or complete provider payloads.
+- Codex-native handoffs provide structural separation: a fresh verifier and judge receive only prepared resources. This is not cryptographic or operating-system isolation; a shared runtime may still expose resources outside the prepared workspace.
 
-Run      fl_8ea9c89f44170a36
-Base     a81cc2d1
-Task     captured
-Spec     captured deterministically
+## CLI reference
 
-Ready for implementation.
-```
-
-After making the change and running the repository's normal tests:
-
-```console
-$ flect inspect
-Verifier bundle
-
-Context      focused
-Payload      18422 bytes
-Patch files  2
-  src/auth.rs
-  tests/auth.rs
-
-$ flect verify --echoed-spec fixtures/my-echoed-spec.json
-Flect
-
-Patch
-  2 files
-  +41 / -9
-
-Alignment
-
-  PARTIAL
-
-Recommended action
-
-  REVISE PATCH
-```
-
-`--echoed-spec` is an offline deterministic seam, primarily for tests and evaluation fixtures. Omitting it uses the bundled mock runner and produces `UNCERTAIN`. Real provider configuration is not silently simulated.
-
-## Responses API transport
-
-Flect includes a reusable OpenAI-compatible Responses API runner with strict JSON Schema output, credential redaction, timeouts, and typed provider errors. Configure it in `flect.toml`:
-
-```toml
-[runner]
-kind = "api"
-protocol = "responses"
-base_url = "https://api.openai.com/v1"
-api_key_env = "OPENAI_API_KEY"
-# Defaults shown explicitly; either value remains configurable.
-model = "gpt-5.6-luna"
-fallback_model = "gpt-5.6-terra"
-reasoning_effort = "medium"
-timeout_seconds = 120
-escalate_on_uncertain = true
-confidence_threshold = 0.65
-complexity_file_threshold = 12
-complexity_byte_threshold = 200000
-```
-
-Set the named environment variable outside the configuration file. `flect doctor` reports whether it is present without printing its value. With `kind = "api"`, `flect start` generates the forward specification, `flect echo` performs blind reconstruction, and `flect verify` performs blind reconstruction followed by semantic reconciliation. Provider, model, latency, and reported token usage are persisted with the relevant run or verification result; credential values are not.
-
-Before making a paid request, inspect the exact privacy boundary and runner selection:
-
-```console
-flect verify --dry-run
-flect --json verify --dry-run
-```
-
-Dry-run output includes the provider, model, context policy, included patch/context files, and excluded paths. It never initializes the API runner or reads the credential value. See [model routing and cost estimates](docs/model-routing.md) for fallback signals, request limits, and the versioned pricing table.
-
-## Commands
-
-- `flect init` — install strict defaults and ignore local state.
-- `flect start` — record the original task, base commit, and conservative `IntendedSpec`.
-- `flect inspect` — print the exact sanitized verifier bundle without invoking a runner.
-- `flect verify` — reconstruct intent and persist a structured verdict.
-- `flect echo [REVISION]` — describe a patch without needing an original task.
-- `flect doctor` — check Git, repository discovery, configuration, and runner readiness.
+- `flect init` — initialize configuration and project-local state.
+- `flect start` — capture the original task and immutable base revision.
+- `flect inspect` — show exactly what a verifier would receive without invoking a runner.
+- `flect verify` — reconstruct intent, reconcile it with the task, and persist a verdict.
+- `flect echo [REVISION]` — describe what a patch appears to do without an original task.
+- `flect doctor` — diagnose Git, repository, configuration, and runner readiness.
 - `flect config show|set KEY VALUE` — inspect or update common configuration fields.
-- `flect agent cleanup` — report and remove Flect-owned completed verifier workspaces; use `--dry-run`, `--older-than HOURS`, or explicit `--all` as needed.
-- `flect mcp` — serve automated and agent-mediated Flect tools over stdio MCP.
-- `flect eval` — run deterministic fixtures or an explicitly opt-in model comparison.
-- `flect skill install|status|uninstall` — safely manage the project-local Codex Skill.
+- `flect skill install|status|uninstall` — manage the project-local Codex Skill.
+- `flect mcp` — serve Flect tools over stdio MCP.
 
-Every command supports `--json`. Use `--verbose` or `--verbose --verbose` for internal diagnostics; complete model payloads are not logged.
+Every command supports `--json`; use `--verbose` for diagnostics. Advanced evaluation, cleanup, routing, and protocol details live in the linked documentation.
 
-## Codex Skill
+## Documentation
 
-The canonical Skill lives at `skills/flect`. Install it into [Codex's official repository-scoped discovery path](https://learn.chatgpt.com/docs/build-skills#where-codex-loads-local-skills):
+- [Getting started](docs/getting-started.md) · [Installation](docs/installation.md)
+- [Architecture](docs/architecture.md) · [Blind verification](docs/blind-verification.md)
+- [Privacy model](docs/privacy.md) · [Codex MCP integration](docs/mcp.md)
+- [Model routing and cost estimates](docs/model-routing.md) · [Evaluation methodology](docs/evaluation.md)
+- [Research and attribution](docs/research.md) · [Security policy](SECURITY.md)
+- [Contributing](CONTRIBUTING.md) · [Project governance](docs/governance.md)
 
-```console
-flect skill install
-flect skill status
-```
+## Project status and limitations
 
-Installation targets `.agents/skills/flect`, is idempotent, and refuses to overwrite modified content. `flect skill uninstall` removes only files whose contents still exactly match the Flect-owned bundle; modified or additional files are preserved.
+Flect is pre-1.0 software. The verification pipeline, Codex Skill, Responses-compatible API mode, stdio MCP adapter, and native release workflow are implemented; interfaces and defaults may evolve.
 
-The Skill keeps the active implementation agent out of the verifier role. In Codex-native mode it requires a fresh child with no inherited turns and a distinct fresh judge; in API mode Flect makes the configured Responses-compatible calls. See [isolation assurance](skills/flect/references/isolation.md) before describing either result.
+The API transport currently implements the Responses-style protocol; Chat Completions compatibility is not implemented. Codex-native verification depends on fresh no-parent-context handoffs, and its boundary is structural rather than a security sandbox. See [installation](docs/installation.md) for release availability.
 
-Completed Codex-native handoffs persist the verification record and then remove their Flect-owned temporary blind workspace by default. Unfinished workspaces are retained for diagnosis. `flect agent cleanup --dry-run` reports eligible completed jobs; `--older-than HOURS` selects stale jobs and `--all` intentionally discards unfinished forensic state. Cleanup rejects paths that cannot be proven to be an immediate child of Flect's temporary workspace root and outside the repository.
+## Attribution and license
 
-## Codex MCP
-
-`flect mcp` exposes the automated tools plus `flect_prepare_blind`, `flect_submit_echo`, `flect_prepare_reconciliation`, and the typed `flect_judge_*` lifecycle. Agent handoff tools call the shared `flect-app` service directly; all modes converge on the same domain records and project-local state. See [Codex MCP integration](docs/mcp.md) for lifecycle, errors, and `.codex/config.toml` setup.
-
-## Evaluation
-
-`flect eval` runs 40 deterministic repository-level cases without an API key. Model-backed comparison is available only with both a reviewed profiles file and `--allow-paid-api`; the example compares Luna, Luna with bounded Terra escalation, and Terra. See [evaluation methodology](docs/evaluation.md) before interpreting results.
-
-## Design and safety
-
-- Git access is read-only. Flect never commits, stages, resets, checks out, changes branches, or edits Git configuration.
-- `.env`, private keys, credential/secret paths, binaries, build output, vendored code, and dependency directories are excluded before bundle construction.
-- Focused context contains changed file contents and a small deterministic set of root manifests, subject to byte limits.
-- State is versioned JSON under the project-local `.flect/` directory. Credentials are never stored there.
-- Normal tests use `MockRunner` and require no API key.
-
-Read [the architecture](docs/architecture.md), [blind verification boundary](docs/blind-verification.md), and [privacy model](docs/privacy.md) before extending provider behavior.
-
-## Research attribution
-
-Flect is inspired by the reconstruct-and-verify method described in **Independent Patch Verification for Coding Agents with a Bidirectional Reconstruct-and-Verify Framework** (RETRACE), [arXiv:2608.08950](https://arxiv.org/abs/2608.08950). Flect does not claim to have invented that academic method. See [Research and attribution](docs/research.md) for the reported RETRACE results, full authorship, and a separation of research concepts from Flect-specific engineering.
-
-## License
+Flect is inspired by **Independent Patch Verification for Coding Agents with a Bidirectional Reconstruct-and-Verify Framework** (RETRACE) by Chenglin Li, Yisen Xu, Zehao Wang, Shin Hwei Tan, and Tse-Hsun (Peter) Chen. Flect does not claim to have invented that academic method or to reproduce its empirical results. See the [research notes](docs/research.md) for the full attribution.
 
 Flect is available under the [MIT License](LICENSE).
