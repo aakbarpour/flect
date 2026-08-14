@@ -1,0 +1,4 @@
+interface:
+  display_name: "Flect Verification"
+  short_description: "Run API or fresh-agent Flect verification"
+  default_prompt: "Use $flect to verify this implementation with fresh blind and judge agents."

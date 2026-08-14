@@ -25,6 +25,17 @@ flect verify
 
 `gpt-5.6-luna` is the default primary and `gpt-5.6-terra` is the default bounded fallback; both remain configurable. Flect tries the primary once and can fall back once for malformed output, low confidence, uncertainty, or configured complexity signals. Use `runner.fallback_model none` to clear the fallback. See [model routing](model-routing.md).
 
+## Codex repository plugin mode
+
+The repository marketplace plugin is the preferred Codex integration. Install the verified `flect` executable first, confirm it is on `PATH`, then run:
+
+```console
+codex plugin marketplace add aakbarpour/flect
+codex plugin add flect@flect
+```
+
+The plugin bundles the Skill and local stdio MCP configuration. Its MCP process runs `flect mcp` in the active Git worktree, so it can inspect the repository where the Codex task is running. Start a new task after installation so Codex loads both components. When the repository publishes an update, refresh the source with `codex plugin marketplace upgrade flect`, reinstall with `codex plugin add flect@flect`, and use a new task.
+
 ## Codex Skill mode
 
 From the target repository:
@@ -41,7 +52,7 @@ The local workspace boundary is `structural`, not an OS sandbox. The child recei
 
 ## MCP mode
 
-Register `flect mcp` using the current Codex stdio configuration in [the MCP guide](mcp.md). A Codex-native tool sequence is:
+The manual MCP path remains available for hosts without repository marketplace support. Register `flect mcp` using the current Codex stdio configuration in [the MCP guide](mcp.md). A Codex-native tool sequence is:
 
 1. `flect_start` with the exact user task before edits.
 2. Run implementation and repository tests.

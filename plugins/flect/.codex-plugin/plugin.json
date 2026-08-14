@@ -1,0 +1,29 @@
+{
+  "name": "flect",
+  "version": "0.1.0",
+  "description": "Blind verification for AI-written patches in Git repositories.",
+  "author": {
+    "name": "Flect contributors",
+    "url": "https://github.com/aakbarpour/flect"
+  },
+  "homepage": "https://github.com/aakbarpour/flect#readme",
+  "repository": "https://github.com/aakbarpour/flect",
+  "license": "MIT",
+  "keywords": ["verification", "git", "codex", "mcp"],
+  "skills": "./skills/",
+  "mcpServers": "./.mcp.json",
+  "interface": {
+    "displayName": "Flect",
+    "shortDescription": "Blind verification for AI-written patches",
+    "longDescription": "Capture the original task, reconstruct patch intent without it, and reconcile the result through Flect's typed verification workflow.",
+    "developerName": "Flect contributors",
+    "category": "Productivity",
+    "capabilities": ["Read", "Write"],
+    "websiteURL": "https://github.com/aakbarpour/flect",
+    "defaultPrompt": [
+      "Use Flect to verify my current implementation.",
+      "Run blind verification on this repository's changes."
+    ],
+    "brandColor": "#2563EB"
+  }
+}

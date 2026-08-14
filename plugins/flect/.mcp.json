@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "flect": {
+      "command": "flect",
+      "args": ["mcp"]
+    }
+  }
+}
