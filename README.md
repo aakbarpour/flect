@@ -63,7 +63,7 @@ Flect records forward intent, independently reconstructs patch intent, and recon
 
 ## 🚀 Quick start
 
-Use the Codex Skill for the shortest path from an existing Git repository to independent verification.
+Use the repository marketplace plugin for the shortest path from an existing Git repository to independent verification.
 
 1. Download and inspect the installer, then run it.
 
@@ -95,28 +95,37 @@ Use the Codex Skill for the shortest path from an existing Git repository to ind
    flect --version
    ```
 
-3. Enter the Git repository where an agent will make a change:
+3. Add and install the Flect plugin in Codex:
+
+   ```console
+   codex plugin marketplace add aakbarpour/flect
+   codex plugin add flect@flect
+   ```
+
+   The plugin provides both the Flect Skill and a local stdio MCP server. It runs the `flect` executable already on your `PATH`; it does not download a binary. Start a new Codex task after installing so the Skill and MCP tools are loaded.
+
+4. Enter the Git repository where an agent will make a change:
 
    ```console
    cd /path/to/your/repository
    ```
 
-4. Initialize project-local configuration:
+5. Initialize project-local configuration:
 
    ```console
    flect init
    ```
 
-5. Install and check the project-local Skill:
+6. If you are using the manual Skill fallback instead of the plugin, install and check it:
 
    ```console
    flect skill install
    flect skill status
    ```
 
-6. Ask Codex: **“Use Flect verification for this implementation.”** Flect captures the task, prepares the blind handoff, and validates the structured results.
+7. Ask Codex: **“Use Flect verification for this implementation.”** Flect captures the task, prepares the blind handoff, and validates the structured results.
 
-7. Review the verdict and follow its recommended action. Use `flect inspect` or `flect verify --dry-run` to inspect the request boundary first.
+8. Review the verdict and follow its recommended action. Use `flect inspect` or `flect verify --dry-run` to inspect the request boundary first.
 
 See [installation](docs/installation.md) for archives, checksums, Windows instructions, and source-install details; see [getting started](docs/getting-started.md) for credentials, providers, troubleshooting, and the full lifecycle.
 
@@ -124,11 +133,12 @@ See [installation](docs/installation.md) for archives, checksums, Windows instru
 
 | Mode | Best for | Start here |
 | --- | --- | --- |
-| **Codex Skill** | Developers already working in Codex | `flect skill install` and ask Codex to use Flect |
+| **Codex repository plugin** | Developers already working in Codex | `codex plugin marketplace add aakbarpour/flect`, then `codex plugin add flect@flect` |
+| **Codex Skill (manual fallback)** | Environments without plugin marketplace support | `flect skill install` and ask Codex to use Flect |
 | **Responses-compatible API** | Automated or provider-configured workflows | Configure `runner.kind = "api"`, then use `flect start` and `flect verify` |
-| **stdio MCP** | Hosts that discover tools through MCP | Register `flect mcp` with the host |
+| **stdio MCP (manual fallback)** | Hosts that discover tools through MCP | Register `flect mcp` with the host |
 
-All three entry points use the same Flect application and policy. Follow [getting started](docs/getting-started.md), [model routing](docs/model-routing.md), and [MCP](docs/mcp.md) for configuration details.
+All integration paths use the same Flect application and policy. Follow [getting started](docs/getting-started.md), [model routing](docs/model-routing.md), and [MCP](docs/mcp.md) for configuration details.
 
 ## Understand the verdicts
 

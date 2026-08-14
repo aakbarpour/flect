@@ -2,9 +2,25 @@
 
 Flect exposes its application workflows as a local stdio Model Context Protocol server. Automated tools delegate to the existing machine-readable CLI path; agent handoff tools call `flect-app::AgentService` directly. Both converge on the same domain types, evidence policy, and versioned project-local `RunStore`.
 
+## Repository marketplace plugin
+
+The preferred Codex setup installs the bundled Skill and MCP configuration from this repository marketplace:
+
+```console
+codex plugin marketplace add aakbarpour/flect
+codex plugin add flect@flect
+```
+
+The plugin's `.mcp.json` invokes `flect mcp` by name. Install the verified native executable separately and keep it on `PATH`; the plugin never downloads an executable. The MCP process must start in the Git worktree that Flect should inspect. Start a new Codex task after installing or upgrading the plugin so its cached Skill and MCP configuration are reloaded:
+
+```console
+codex plugin marketplace upgrade flect
+codex plugin add flect@flect
+```
+
 ## Configure Codex
 
-Build Flect, then register the absolute binary path with the current Codex CLI:
+For hosts without repository marketplace support, build or install Flect and register the absolute binary path with the current Codex CLI:
 
 ```console
 cargo build --release

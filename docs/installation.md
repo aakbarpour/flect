@@ -55,6 +55,19 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\install.ps1 `
 
 If the destination is not already on PATH, the installer prints the exact shell or PowerShell assignment to use. Add it deliberately to your profile if you want it to persist. For environments that prohibit scripts, use the archive method below or install from source.
 
+## Install the Codex repository plugin
+
+After the executable is installed, `flect --version` succeeds, and the executable is on `PATH`, add the Flect repository marketplace and install its local plugin:
+
+```console
+codex plugin marketplace add aakbarpour/flect
+codex plugin add flect@flect
+```
+
+The plugin bundles the Flect Skill and a stdio MCP configuration. The MCP configuration invokes `flect mcp` from `PATH`, so plugin installation does not download or replace the executable. Start a new Codex task after installation. To refresh a changed marketplace source, run `codex plugin marketplace upgrade flect`, reinstall with `codex plugin add flect@flect`, and start a new task.
+
+If plugin marketplace support is unavailable, use the manual paths documented in [getting started](getting-started.md) and [the MCP guide](mcp.md).
+
 ## GitHub release archives
 
 Each tagged release publishes five native archives, the two bootstrap installers, and `SHA256SUMS`:

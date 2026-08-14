@@ -320,4 +320,70 @@ mod tests {
         assert_eq!(uninstall(&root).unwrap().status, InstallStatus::Missing);
         assert!(!uninstall(&root).unwrap().changed);
     }
+
+    #[test]
+    fn packaged_skill_matches_canonical_sources() {
+        let packaged_root =
+            Path::new(env!("CARGO_MANIFEST_DIR")).join("../../plugins/flect/skills/flect");
+        for owned in OWNED_FILES {
+            let packaged_path = packaged_root.join(owned.relative_path);
+            let packaged = fs::read(&packaged_path).unwrap_or_else(|error| {
+                panic!(
+                    "could not read packaged skill file {}: {error}",
+                    packaged_path.display()
+                )
+            });
+            assert_eq!(
+                packaged,
+                owned.contents.as_bytes(),
+                "packaged skill file {} differs from the canonical source",
+                owned.relative_path
+            );
+        }
+    }
+
+    #[test]
+    fn repository_plugin_manifests_match_flect_package() {
+        let repository_root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+        let plugin_root = repository_root.join("plugins/flect");
+        assert_eq!(
+            plugin_root.file_name().and_then(|name| name.to_str()),
+            Some("flect")
+        );
+
+        let manifest: serde_json::Value = serde_json::from_str(
+            &fs::read_to_string(plugin_root.join(".codex-plugin/plugin.json")).unwrap(),
+        )
+        .unwrap();
+        assert_eq!(manifest["name"], "flect");
+        assert_eq!(manifest["version"], env!("CARGO_PKG_VERSION"));
+        assert_eq!(manifest["skills"], "./skills/");
+        assert_eq!(manifest["mcpServers"], "./.mcp.json");
+
+        let mcp: serde_json::Value =
+            serde_json::from_str(&fs::read_to_string(plugin_root.join(".mcp.json")).unwrap())
+                .unwrap();
+        assert_eq!(mcp["mcpServers"]["flect"]["command"], "flect");
+        assert_eq!(
+            mcp["mcpServers"]["flect"]["args"],
+            serde_json::json!(["mcp"])
+        );
+
+        let marketplace: serde_json::Value = serde_json::from_str(
+            &fs::read_to_string(repository_root.join(".agents/plugins/marketplace.json")).unwrap(),
+        )
+        .unwrap();
+        assert_eq!(marketplace["name"], "flect");
+        let entry = marketplace["plugins"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|entry| entry["name"] == "flect")
+            .unwrap();
+        assert_eq!(entry["source"]["source"], "local");
+        assert_eq!(entry["source"]["path"], "./plugins/flect");
+        assert_eq!(entry["policy"]["installation"], "AVAILABLE");
+        assert_eq!(entry["policy"]["authentication"], "ON_INSTALL");
+        assert_eq!(entry["category"], "Productivity");
+    }
 }
