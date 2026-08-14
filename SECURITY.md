@@ -6,7 +6,7 @@ Flect handles source code and can send selected code to configured remote model 
 
 Please do not open a public issue for a suspected secret disclosure, BlindGuard bypass, path-filter escape, command-injection issue, or unsafe state mutation. Use GitHub's private security-advisory flow for the repository. Include affected versions, reproduction steps, impact, and any proposed mitigation.
 
-No response-time guarantee is published while the project is pre-release. Maintainers will acknowledge valid reports as capacity allows and coordinate disclosure after a fix is available.
+No response-time guarantee is published. Maintainers will acknowledge valid reports as capacity allows and coordinate disclosure after a fix is available.
 
 ## Current boundary
 
